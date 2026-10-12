@@ -1,6 +1,7 @@
 import { prisma } from '../db/prisma.js';
 import { env } from '../config/index.js';
 import { circuitBreaker } from './circuitBreaker.js';
+import { settingsService } from './settings.js';
 import { logger } from './logger.js';
 import crypto from 'crypto';
 
@@ -46,13 +47,14 @@ export class TradeExecutor {
     });
 
     try {
+      const settings = await settingsService.getSettings();
       const rawMetrics = (signal.rawMetrics as any) || {};
       const currentPrice = rawMetrics.priceUsd && rawMetrics.priceUsd > 0 ? rawMetrics.priceUsd : 0.001;
-      const tradeUsd = env.TRADE_AMOUNT_USD;
+      const tradeUsd = settings.tradeAmountUsd;
       const tokenAmount = tradeUsd / currentPrice;
 
       let txHash = '';
-      const isPaper = env.PAPER_TRADING || !env.SOLANA_PRIVATE_KEY;
+      const isPaper = settings.paperTrading || !settings.mySolanaPrivateKey;
 
       if (isPaper) {
         txHash = `paper_buy_${crypto.randomBytes(16).toString('hex')}`;
@@ -77,8 +79,8 @@ export class TradeExecutor {
           totalUsd: tradeUsd,
           txHash,
           status: 'confirmed',
-          slippageBps: env.SLIPPAGE_BPS,
-          priorityFee: env.MAX_PRIORITY_FEE,
+          slippageBps: settings.slippageBps,
+          priorityFee: settings.maxPriorityFee,
           isPaper,
         },
       });
@@ -148,7 +150,8 @@ export class TradeExecutor {
     const pnlPercent = ((exitPrice - position.entryPrice) / position.entryPrice) * 100;
     const totalUsd = position.entryAmount * exitPrice;
 
-    const isPaper = env.PAPER_TRADING || !env.SOLANA_PRIVATE_KEY;
+    const settings = await settingsService.getSettings();
+    const isPaper = settings.paperTrading || !settings.mySolanaPrivateKey;
     let txHash = '';
 
     if (isPaper) {
@@ -170,8 +173,8 @@ export class TradeExecutor {
         totalUsd,
         txHash,
         status: 'confirmed',
-        slippageBps: env.SLIPPAGE_BPS,
-        priorityFee: env.MAX_PRIORITY_FEE,
+        slippageBps: settings.slippageBps,
+        priorityFee: settings.maxPriorityFee,
         isPaper,
       },
     });

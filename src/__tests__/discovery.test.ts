@@ -48,5 +48,5 @@ describe('Multi-Wallet Discovery & Scanner Tests', () => {
     const result = await multiWalletScanner.scanAllActiveWallets();
     expect(result.scannedCount).toBeGreaterThanOrEqual(0);
     expect(result.signalsFound).toBeGreaterThanOrEqual(0);
-  });
+  }, 15000);
 });

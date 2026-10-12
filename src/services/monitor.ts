@@ -52,10 +52,13 @@ export class PositionMonitorService {
       },
     });
 
-    // 1. STOP-LOSS CHECK: pnl <= -20% -> Auto-Sell immediately without approval
-    if (pnlPercent <= -env.STOP_LOSS_PERCENT) {
+    const { settingsService } = await import('./settings.js');
+    const settings = await settingsService.getSettings();
+
+    // 1. STOP-LOSS CHECK: pnl <= -stopLossPercent -> Auto-Sell immediately without approval
+    if (pnlPercent <= -settings.stopLossPercent) {
       logger.warn(
-        { positionId: pos.id, pnlPercent, threshold: -env.STOP_LOSS_PERCENT },
+        { positionId: pos.id, pnlPercent, threshold: -settings.stopLossPercent },
         'STOP LOSS TRIGGERED: Executing immediate auto sell'
       );
 

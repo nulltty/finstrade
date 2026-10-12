@@ -138,3 +138,38 @@ model WatchedWallet {
   @@map("watched_wallets")
 }
 
+model BotSetting {
+  id                    String                 @id @default("default")
+  paperTrading          Boolean                @default(true) @map("paper_trading")
+  chain                 String                 @default("solana")
+  tradeAmountUsd        Float                  @default(25.0) @map("trade_amount_usd")
+  maxOpenPositions      Int                    @default(5) @map("max_open_positions")
+  maxDailySpendUsd      Float                  @default(200.0) @map("max_daily_spend_usd")
+  slippageBps           Int                    @default(500) @map("slippage_bps")
+  maxPriorityFee        Float                  @default(0.001) @map("max_priority_fee")
+
+  stopLossPercent       Float                  @default(20.0) @map("stop_loss_percent")
+  takeProfitPercent     Float                  @default(100.0) @map("take_profit_percent")
+  takeProfitStep        Float                  @default(50.0) @map("take_profit_step")
+  approvalTimeoutSec    Int                    @default(120) @map("approval_timeout_sec")
+  buyTimeoutAction      String                 @default("skip") @map("buy_timeout_action")
+
+  scoringThreshold      Float                  @default(75.0) @map("scoring_threshold")
+  minLiquidityUsd       Float                  @default(10000.0) @map("min_liquidity_usd")
+  hardFailMinLiquidity  Float                  @default(5000.0) @map("hard_fail_min_liquidity")
+
+  autoScanIntervalSec   Int                    @default(20) @map("auto_scan_interval_sec")
+  autoDiscoveryEnabled  Boolean                @default(true) @map("auto_discovery_enabled")
+  autoDiscoveryIntervalMin Int                 @default(60) @map("auto_discovery_interval_min")
+
+  mySolanaWallet        String?                @map("my_solana_wallet")
+  mySolanaPrivateKey    String?                @map("my_solana_private_key")
+  telegramBotToken      String?                @map("telegram_bot_token")
+  telegramChatId        String?                @map("telegram_chat_id")
+
+  updatedAt             DateTime               @updatedAt @map("updated_at")
+
+  @@map("bot_settings")
+}
+
+

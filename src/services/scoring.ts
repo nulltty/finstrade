@@ -18,7 +18,8 @@ export interface ScoreResult {
 }
 
 export class ScoringEngine {
-  calculateScore(metrics: AggregatedTokenMetrics): ScoreResult {
+  calculateScore(metrics: AggregatedTokenMetrics, customThreshold?: number): ScoreResult {
+    const threshold = customThreshold !== undefined ? customThreshold : env.SCORING_THRESHOLD;
     const hardFailReasons: string[] = [];
     let isHardFail = false;
 
@@ -144,7 +145,7 @@ export class ScoringEngine {
       finalScore = Math.min(finalScore, 15); // force below threshold
     }
 
-    const passedThreshold = !isHardFail && finalScore >= env.SCORING_THRESHOLD;
+    const passedThreshold = !isHardFail && finalScore >= threshold;
 
     return {
       totalScore: finalScore,

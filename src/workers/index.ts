@@ -22,8 +22,10 @@ export function startWorkers() {
       // Fetch & aggregate metrics
       const metrics = await tokenDataAggregator.aggregate(signalId);
 
-      // Score
-      const scoreResult = scoringEngine.calculateScore(metrics);
+      // Score with dynamic threshold from settings
+      const { settingsService } = await import('../services/settings.js');
+      const settings = await settingsService.getSettings();
+      const scoreResult = scoringEngine.calculateScore(metrics, settings.scoringThreshold);
       await scoringEngine.saveScore(signalId, scoreResult);
 
       // Trigger Telegram Alert if score passes threshold
@@ -102,13 +104,19 @@ export function startWorkers() {
     { connection: redisConnection }
   );
 
-  // 4. Multi-Wallet On-Chain Scanner Worker (Scans dozens/hundreds of whales periodically)
+  // 4. Multi-Wallet On-Chain Scanner & Discovery Worker
   const scannerWorker = new Worker(
     'multi-wallet-scanner',
     async (job: Job) => {
-      const { multiWalletScanner } = await import('../services/scanner.js');
-      const result = await multiWalletScanner.scanAllActiveWallets();
-      return result;
+      if (job.name === 'auto-discover-whales') {
+        const { whaleDiscovery } = await import('../services/discovery.js');
+        const result = await whaleDiscovery.autoDiscoverWhalesFromTrending();
+        return result;
+      } else {
+        const { multiWalletScanner } = await import('../services/scanner.js');
+        const result = await multiWalletScanner.scanAllActiveWallets();
+        return result;
+      }
     },
     { connection: redisConnection }
   );
@@ -120,11 +128,18 @@ export function startWorkers() {
     logger.error({ err }, 'Failed to schedule position monitor repeatable job');
   });
 
-  // Schedule repeatable multi-wallet scanning every 30 seconds
+  // Schedule repeatable multi-wallet scanning every 20 seconds (Continuous 24/7 scanning)
   multiWalletScannerQueue.upsertJobScheduler('scan-active-whales', {
-    every: 30000,
+    every: 20000,
   }).catch((err) => {
     logger.error({ err }, 'Failed to schedule multi-wallet scanner repeatable job');
+  });
+
+  // Schedule repeatable auto-discovery of new whales from trending coins every 15 minutes
+  multiWalletScannerQueue.upsertJobScheduler('auto-discover-whales', {
+    every: 15 * 60 * 1000,
+  }).catch((err) => {
+    logger.error({ err }, 'Failed to schedule auto-discover-whales repeatable job');
   });
 
   signalWorker.on('failed', (job, err) => logger.error({ jobId: job?.id, err }, 'Signal worker failed'));
