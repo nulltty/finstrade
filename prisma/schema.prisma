@@ -1,0 +1,140 @@
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+model Signal {
+  id                    String                 @id @default(uuid())
+  wallet                String
+  chain                 String                 // 'solana' | 'evm'
+  tokenAddress          String                 @map("token_address")
+  tokenSymbol           String?                @map("token_symbol")
+  tokenName             String?                @map("token_name")
+  txHash                String                 @unique @map("tx_hash")
+  amountUsd             Float?                 @map("amount_usd")
+  status                String                 @default("detected") // detected, aggregated, scored, pending_approval, approved, skipped, timeout_expired, executing_buy, bought, failed
+  rawTx                 Json?                  @map("raw_tx")
+  rawMetrics            Json?                  @map("raw_metrics")
+  createdAt             DateTime               @default(now()) @map("created_at")
+  updatedAt             DateTime               @updatedAt @map("updated_at")
+
+  score                 Score?
+  positions             Position[]
+  trades                Trade[]
+  telegramInteractions  TelegramInteraction[]
+
+  @@map("signals")
+}
+
+model Score {
+  id                    String                 @id @default(uuid())
+  signalId              String                 @unique @map("signal_id")
+  totalScore            Float                  @map("total_score")
+  isHardFail            Boolean                @default(false) @map("is_hard_fail")
+  hardFailReasons       Json?                  @map("hard_fail_reasons")
+  breakdown             Json
+  createdAt             DateTime               @default(now()) @map("created_at")
+
+  signal                Signal                 @relation(fields: [signalId], references: [id], onDelete: Cascade)
+
+  @@map("scores")
+}
+
+model Position {
+  id                    String                 @id @default(uuid())
+  signalId              String?                @map("signal_id")
+  chain                 String
+  tokenAddress          String                 @map("token_address")
+  tokenSymbol           String?                @map("token_symbol")
+  entryPrice            Float                  @map("entry_price")
+  entryAmount           Float                  @map("entry_amount")
+  currentPrice          Float                  @map("current_price")
+  pnlPercent            Float                  @default(0) @map("pnl_percent")
+  highestPnlPercent     Float                  @default(0) @map("highest_pnl_percent")
+  nextTpThreshold       Float                  @default(100) @map("next_tp_threshold")
+  status                String                 @default("open") // open, closed
+  exitPrice             Float?                 @map("exit_price")
+  exitReason            String?                @map("exit_reason") // stop_loss, take_profit_approved, take_profit_timeout, manual
+  openedAt              DateTime               @default(now()) @map("opened_at")
+  closedAt              DateTime?              @map("closed_at")
+  updatedAt             DateTime               @updatedAt @map("updated_at")
+
+  signal                Signal?                @relation(fields: [signalId], references: [id])
+  trades                Trade[]
+  telegramInteractions  TelegramInteraction[]
+
+  @@map("positions")
+}
+
+model Trade {
+  id                    String                 @id @default(uuid())
+  positionId            String?                @map("position_id")
+  signalId              String?                @map("signal_id")
+  side                  String                 // 'BUY', 'SELL'
+  chain                 String
+  tokenAddress          String                 @map("token_address")
+  price                 Float
+  amount                Float
+  totalUsd              Float                  @map("total_usd")
+  txHash                String                 @map("tx_hash")
+  status                String                 @default("confirmed") // pending, confirmed, failed
+  slippageBps           Int?                   @map("slippage_bps")
+  priorityFee           Float?                 @map("priority_fee")
+  isPaper               Boolean                @default(false) @map("is_paper")
+  createdAt             DateTime               @default(now()) @map("created_at")
+
+  position              Position?              @relation(fields: [positionId], references: [id])
+  signal                Signal?                @relation(fields: [signalId], references: [id])
+
+  @@map("trades")
+}
+
+model TelegramInteraction {
+  id                    String                 @id @default(uuid())
+  signalId              String?                @map("signal_id")
+  positionId            String?                @map("position_id")
+  messageId             Int                    @map("message_id")
+  chatId                String                 @map("chat_id")
+  alertType             String                 @map("alert_type") // buy_approval, take_profit_approval, stop_loss_alert
+  actionTaken           String?                @map("action_taken") // approved, skipped, sell, hold, timeout
+  respondedAt           DateTime?              @map("responded_at")
+  createdAt             DateTime               @default(now()) @map("created_at")
+
+  signal                Signal?                @relation(fields: [signalId], references: [id])
+  position              Position?              @relation(fields: [positionId], references: [id])
+
+  @@map("telegram_interactions")
+}
+
+model AuditLog {
+  id                    String                 @id @default(uuid())
+  action                String
+  reason                String
+  payload               Json?
+  createdAt             DateTime               @default(now()) @map("created_at")
+
+  @@map("audit_logs")
+}
+
+model WatchedWallet {
+  id                    String                 @id @default(uuid())
+  address               String                 @unique
+  chain                 String                 @default("solana")
+  label                 String?
+  tags                  String[]               @default([])
+  winRate               Float?                 @map("win_rate")
+  totalPnlUsd           Float?                 @map("total_pnl_usd")
+  isActive              Boolean                @default(true) @map("is_active")
+  lastScannedAt         DateTime?              @map("last_scanned_at")
+  lastTxHash            String?                @map("last_tx_hash")
+  discoveredVia         String?                @map("discovered_via")
+  createdAt             DateTime               @default(now()) @map("created_at")
+  updatedAt             DateTime               @updatedAt @map("updated_at")
+
+  @@map("watched_wallets")
+}
+

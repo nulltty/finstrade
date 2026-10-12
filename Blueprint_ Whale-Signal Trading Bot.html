@@ -1,0 +1,366 @@
+<!doctype html><html><head><meta charset=utf8><meta name=viewport content="width=device-width,initial-scale=1,viewport-fit=cover"><style>:root{box-sizing:border-box;padding-top:env(safe-area-inset-top,0px);padding-bottom:env(safe-area-inset-bottom,0px)}html{scroll-padding-top:env(safe-area-inset-top,0px)}</style><style>:root{color-scheme:light dark;--md-bg:#fff;--md-text:rgba(0,0,0,.8);--md-muted:rgba(0,0,0,.6);--md-fill:rgba(0,0,0,.04);--md-fill-strong:rgba(0,0,0,.06);--md-rule:rgba(0,0,0,.1);--md-rule-strong:rgba(0,0,0,.16);--md-link:hsl(210 100% 45%)}@media (prefers-color-scheme:dark){:root:where(:not([data-theme="light"])){--md-bg:#0d0d0d;--md-text:rgba(255,255,255,.85);--md-muted:rgba(255,255,255,.6);--md-fill:rgba(255,255,255,.06);--md-fill-strong:rgba(255,255,255,.09);--md-rule:rgba(255,255,255,.14);--md-rule-strong:rgba(255,255,255,.22);--md-link:hsl(210 100% 72%)}}:root[data-theme="dark"]{color-scheme:dark;--md-bg:#0d0d0d;--md-text:rgba(255,255,255,.85);--md-muted:rgba(255,255,255,.6);--md-fill:rgba(255,255,255,.06);--md-fill-strong:rgba(255,255,255,.09);--md-rule:rgba(255,255,255,.14);--md-rule-strong:rgba(255,255,255,.22);--md-link:hsl(210 100% 72%)}:root[data-theme="light"]{color-scheme:light}@media print{:root,:root[data-theme="dark"]{color-scheme:light;--md-bg:#fff;--md-text:rgba(0,0,0,.8);--md-muted:rgba(0,0,0,.6);--md-fill:rgba(0,0,0,.04);--md-fill-strong:rgba(0,0,0,.06);--md-rule:rgba(0,0,0,.1);--md-rule-strong:rgba(0,0,0,.16);--md-link:hsl(210 100% 45%)}}body{background:var(--md-bg);color:var(--md-text);max-width:720px;margin:0 auto;padding:32px;display:flex;flex-direction:column;gap:10px;font:14px/1.55 -apple-system,BlinkMacSystemFont,'SF Pro','Segoe UI',sans-serif;overflow-wrap:break-word}body>:first-child{margin-top:0}h1,h2,h3,h4,h5,h6{margin:6px 0 0;line-height:1.25;font-weight:600;text-wrap:balance}h1{font-size:1.35em}h2{font-size:1.15em;color:var(--md-muted)}h3,h4,h5,h6{font-size:1em}p,ul,ol,blockquote,table,pre,hr{margin:0}strong{font-weight:600}a{color:var(--md-link);text-decoration:none}a:hover{text-decoration:underline}ul,ol{display:flex;flex-direction:column;gap:6px;padding-left:22px}ul{list-style:disc}ol{list-style:decimal}:is(li,td,th)>*+:is(p,ul,ol,blockquote){margin-top:6px}blockquote{display:flex;flex-direction:column;gap:10px;border-left:2px solid var(--md-rule);padding-left:10px;color:var(--md-muted)}:not(pre)>code{background:var(--md-fill);padding:1px 3px;border-radius:4px;font:.92em 'SF Mono',ui-monospace,Menlo,Consolas,monospace}a>code{background:none;color:inherit}pre{background:var(--md-fill);padding:10px 12px;border-radius:6px;overflow-x:auto;font:12px/1.5 'SF Mono',ui-monospace,Menlo,Consolas,monospace;margin-block:4px}pre code{background:none;padding:0;font:inherit}table{width:100%;border-collapse:separate;border-spacing:2px;font:inherit}th,td{padding:6px 8px;border-radius:3px;text-align:left;vertical-align:top}th{background:var(--md-fill-strong);font-weight:600}td{background:var(--md-fill)}:is(th,td) :not(pre)>code{background:transparent}hr{border:0;border-top:1px solid var(--md-rule-strong);margin-block:10px}img{max-width:100%;height:auto;border-radius:4px}</style>
+</head><body>
+<h1>Blueprint: Whale-Signal Meme Coin Trading Bot</h1>
+<blockquote>
+<p>Dokumen ini adalah spesifikasi teknis untuk diserahkan ke Claude (Code) sebagai brief pengerjaan. Berisi arsitektur, alur data, scoring engine, state machine approval/timeout, dan catatan keamanan.</p>
+</blockquote>
+<h2>⚠️ Catatan sebelum mulai</h2>
+<ul>
+<li>Bot ini akan <strong>mengeksekusi transaksi on-chain nyata dengan uang nyata</strong>. Bug logic = kehilangan dana secara instan.</li>
+<li>Skor &quot;kelayakan&quot; bukan prediksi harga — hanya filter risiko on-chain (liquidity, distribusi holder, keamanan kontrak). Token dengan skor tinggi tetap bisa turun ke nol.</li>
+<li>Mulai dari <strong>testnet / dummy wallet / paper trading</strong> dulu sebelum wire ke wallet asli.</li>
+<li>Private key <strong>tidak boleh</strong> disimpan di kode, repo, atau plaintext di server — pakai secret manager / KMS / hardware wallet signer.</li>
+</ul>
+<hr>
+<h2>1. Ringkasan Alur</h2>
+<pre><code>Whale Wallet Watcher
+        │ (deteksi wallet target beli token baru)
+        ▼
+Token Data Aggregator ──► Scoring Engine ──► skor ≥ 80?
+        (liquidity, holder,                      │
+         kontrak, volume)                         │ ya
+                                                   ▼
+                                  Telegram Alert: [Approve] [Skip]
+                                                   │
+                              ┌────────────────────┴────────────────────┐
+                              │ approve dalam 2 menit                   │ tidak ada respons / timeout
+                              ▼                                          ▼
+                     Trade Executor: BUY                              tidak beli, arsipkan sinyal
+                              │
+                              ▼
+                   Position Monitor (real-time price)
+                     │                        │
+          harga turun ≥20%             harga naik ≥100%
+          dari entry                          │
+                 │                            ▼
+                 ▼                 Telegram Alert: [Sell] [Hold]
+          AUTO SELL (stop loss)         │
+          — tanpa approval               ┌───┴────┐
+                                    approve/hold   timeout 2 menit
+                                          │             │
+                                     ikuti pilihan   AUTO SELL
+</code></pre>
+<p>Prinsip kunci: <strong>stop-loss selalu otomatis tanpa approval</strong> (karena tujuannya membatasi kerugian cepat), sedangkan <strong>take-profit butuh approval</strong> karena ada opsi &quot;hold&quot; untuk lanjut naik — dan timeout diam-diam default ke <strong>sell</strong>, bukan hold (biar aman kalau kamu nggak sempat respon).</p>
+<hr>
+<h2>2. Komponen Sistem</h2>
+<h3>2.1 Whale Wallet Watcher</h3>
+<ul>
+<li>Input: daftar wallet address yang dipantau (per chain: Solana / EVM).</li>
+<li>Sumber data:
+<ul>
+<li>Solana: Helius webhooks / enhanced transaction API</li>
+<li>EVM: Alchemy/Moralis webhook atau mempool + log listener</li>
+</ul>
+</li>
+<li>Trigger event: wallet target melakukan <strong>swap beli</strong> token yang bukan stablecoin/blue-chip (whitelist exclude: SOL, ETH, USDC, USDT, dst).</li>
+<li>Output event: <code>{wallet, chain, token_address, tx_hash, timestamp, amount_usd}</code></li>
+</ul>
+<h3>2.2 Token Data Aggregator</h3>
+<p>Begitu ada token baru terdeteksi, kumpulkan data dari:</p>
+<table>
+<thead>
+<tr>
+<th>Data</th>
+<th>Sumber</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>Liquidity pool size &amp; lock status</td>
+<td>DexScreener API / on-chain pool query</td>
+</tr>
+<tr>
+<td>Top holder distribution</td>
+<td>Bubblemaps API atau on-chain query manual</td>
+</tr>
+<tr>
+<td>Contract safety (honeypot, mint function, ownership renounced)</td>
+<td>GoPlus Security API</td>
+</tr>
+<tr>
+<td>Volume 24 jam, umur token, jumlah holder</td>
+<td>DexScreener / Birdeye (Solana)</td>
+</tr>
+<tr>
+<td>Riwayat rug/scam token serupa (opsional)</td>
+<td>Cache internal / heuristik nama mirip</td>
+</tr>
+</tbody>
+</table>
+<h3>2.3 Scoring Engine</h3>
+<p>Skor 0–100, kombinasi weighted dari beberapa faktor. Contoh bobot (harus bisa dikonfigurasi, bukan hardcode):</p>
+<table>
+<thead>
+<tr>
+<th>Faktor</th>
+<th>Bobot</th>
+<th>Catatan</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>Liquidity locked &amp; size</td>
+<td>25%</td>
+<td>0 kalau tidak locked / &lt;$10K</td>
+</tr>
+<tr>
+<td>Top 10 holder concentration</td>
+<td>20%</td>
+<td>makin rendah % makin baik</td>
+</tr>
+<tr>
+<td>Contract safety (honeypot/mint/renounce)</td>
+<td>25%</td>
+<td>0 otomatis kalau honeypot terdeteksi (hard fail)</td>
+</tr>
+<tr>
+<td>Volume/Market cap ratio</td>
+<td>15%</td>
+<td>volume rendah vs cap tinggi = red flag</td>
+</tr>
+<tr>
+<td>Umur token &amp; jumlah holder</td>
+<td>15%</td>
+<td>token baru &lt;1 jam dapat penalti</td>
+</tr>
+</tbody>
+</table>
+<ul>
+<li><strong>Hard fail rules</strong> (skor langsung dipaksa ke bawah threshold, apapun bobot lain): honeypot terdeteksi, liquidity tidak locked &amp; &lt;$5K, kontrak tidak bisa di-fetch/verifikasi.</li>
+<li>Threshold approval: <strong>≥ 80</strong> → trigger alert Telegram untuk approve beli.</li>
+<li>Simpan breakdown skor (bukan cuma angka akhir) supaya alert Telegram bisa tampilkan alasan.</li>
+</ul>
+<h3>2.4 Telegram Bot (Approval Layer)</h3>
+<ul>
+<li>Alert masuk berisi: nama token, alamat, skor + breakdown, liquidity, top10%, link chart (DexScreener), tombol inline <strong>Approve</strong> / <strong>Skip</strong>.</li>
+<li>State per sinyal: <code>pending → approved / skipped / timeout_expired</code></li>
+<li><strong>Timeout 2 menit</strong> dari pesan alert dikirim:
+<ul>
+<li>Jika tidak ada respons → status <code>timeout_expired</code>, tidak beli, log sebagai missed signal (bukan auto-buy).</li>
+<li><em>(Catatan: untuk fase BUY, kamu minta approve manual — beda dengan fase SELL take-profit yang defaultnya auto-sell saat timeout. Konfirmasi ke Claude Code perilaku mana yang kamu mau untuk fase buy: default skip, seperti di atas, atau ingin auto-buy juga saat timeout? Saran saya: skip, karena beli otomatis tanpa approval lebih berisiko daripada menahan profit.)</em></li>
+</ul>
+</li>
+</ul>
+<h3>2.5 Trade Executor</h3>
+<ul>
+<li>Solana: Jupiter Aggregator API untuk swap</li>
+<li>EVM: 1inch / 0x API untuk swap</li>
+<li>Parameter wajib per eksekusi:
+<ul>
+<li>Slippage tolerance (default misal 5–10% untuk meme coin, harus dikonfigurasi)</li>
+<li>Max gas / priority fee cap</li>
+<li>Position size (fixed USD amount per trade, atau % dari portfolio — <strong>jangan all-in</strong>)</li>
+<li>Simpan <code>entry_price</code>, <code>entry_amount</code>, <code>tx_hash</code>, <code>timestamp</code> begitu order fill</li>
+</ul>
+</li>
+</ul>
+<h3>2.6 Position Monitor</h3>
+<ul>
+<li>Poll harga token setiap X detik (misal 10–15 detik) via DexScreener/Birdeye price feed selama posisi terbuka.</li>
+<li>Hitung <code>pnl_percent = (current_price - entry_price) / entry_price * 100</code></li>
+<li>Logic:
+<ul>
+<li><code>pnl_percent &lt;= -20%</code> → <strong>AUTO SELL langsung</strong>, tanpa approval, eksekusi sesegera mungkin. Kirim notifikasi Telegram <em>setelah</em> eksekusi (bukan sebelum).</li>
+<li><code>pnl_percent &gt;= 100%</code> → kirim Telegram alert <strong>[Sell] [Hold]</strong> dengan timeout 2 menit:
+<ul>
+<li>Approve/Sell ditekan → jual sekarang</li>
+<li>Hold ditekan → reset timer, lanjut pantau, alert baru akan muncul lagi di kelipatan berikutnya (misal tiap +50% lagi) supaya tidak kelewat begitu saja</li>
+<li>Timeout 2 menit tanpa respons → <strong>AUTO SELL</strong> (default aman, sesuai request kamu)</li>
+</ul>
+</li>
+</ul>
+</li>
+</ul>
+<h3>2.7 State Machine Approval (ringkasan)</h3>
+<pre><code>BUY SIGNAL FLOW
+pending ──approve──► executing_buy ──filled──► position_open
+   │
+   └──timeout/skip──► archived (no action)
+
+SELL SIGNAL FLOW (take-profit only; stop-loss tidak lewat state ini)
+profit_alert_sent ──approve/sell──► executing_sell ──filled──► position_closed
+   │
+   ├──hold──► position_open (reset alert threshold)
+   │
+   └──timeout(2m)──► executing_sell (auto) ──filled──► position_closed
+</code></pre>
+<h3>2.8 Data &amp; Logging</h3>
+<ul>
+<li>Database (Postgres/SQLite cukup untuk skala personal): tabel <code>signals</code>, <code>scores</code>, <code>positions</code>, <code>trades</code>, <code>telegram_interactions</code>.</li>
+<li>Log <strong>semua</strong> keputusan otomatis (stop loss, timeout auto-sell) dengan timestamp + alasan — penting untuk audit kalau ada bug.</li>
+<li>Dashboard (bisa reuse mockup UI yang sudah dibuat sebelumnya) untuk lihat posisi terbuka, riwayat, dan performa skor vs hasil aktual (buat evaluasi apakah threshold 80 perlu disesuaikan).</li>
+</ul>
+<hr>
+<h2>3. Keamanan &amp; Operasional</h2>
+<ul>
+<li>Private key wallet trading disimpan di <strong>secret manager</strong> (AWS Secrets Manager / GCP Secret Manager / Vault), bukan <code>.env</code> di server yang sama dengan webapp publik.</li>
+<li>Pisahkan wallet trading dari wallet utama — isi hanya sejumlah dana yang siap dipakai/hilang.</li>
+<li>Rate limit &amp; circuit breaker: kalau dalam 1 jam ada &gt;N auto-sell stop-loss beruntun, hentikan sementara auto-buy baru (indikasi kondisi pasar buruk atau bug).</li>
+<li>Idempotency: pastikan webhook whale watcher tidak memicu eksekusi ganda untuk event yang sama (dedupe by tx_hash).</li>
+<li>Uji slippage &amp; gas di kondisi network congested — meme coin sering di chain yang volatile fee-nya.</li>
+</ul>
+<hr>
+<h2>4. Tech Stack (Final)</h2>
+<table>
+<thead>
+<tr>
+<th>Layer</th>
+<th>Pilihan</th>
+<th>Alasan</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>Bahasa &amp; runtime</td>
+<td><strong>Node.js + TypeScript</strong></td>
+<td>Library web3 paling matang di JS (<code>@solana/web3.js</code>, <code>ethers.js</code>, Jupiter SDK, 1inch SDK), event-driven, cocok untuk webhook &amp; bot</td>
+</tr>
+<tr>
+<td>Queue/worker</td>
+<td><strong>BullMQ + Redis</strong></td>
+<td>Delayed job &amp; repeatable job built-in — pas untuk polling harga tiap 15 detik &amp; timeout approval 2 menit</td>
+</tr>
+<tr>
+<td>Database</td>
+<td><strong>PostgreSQL</strong> (via Supabase untuk hosting cepat)</td>
+<td>Perlu concurrent write (trades, scores, telegram_interactions), bukan SQLite</td>
+</tr>
+<tr>
+<td>Whale watcher — Solana</td>
+<td><strong>Helius</strong> (webhook + enhanced transaction API)</td>
+<td>Paling lengkap untuk data Solana</td>
+</tr>
+<tr>
+<td>Whale watcher — EVM</td>
+<td><strong>Alchemy</strong> (webhook + mempool)</td>
+<td>Standar industri, reliable</td>
+</tr>
+<tr>
+<td>Swap eksekusi — Solana</td>
+<td><strong>Jupiter API</strong></td>
+<td>Aggregator swap terbaik di Solana</td>
+</tr>
+<tr>
+<td>Swap eksekusi — EVM</td>
+<td><strong>1inch API</strong></td>
+<td>Aggregator swap terbaik di EVM</td>
+</tr>
+<tr>
+<td>Contract safety scan</td>
+<td><strong>GoPlus Security API</strong></td>
+<td>Deteksi honeypot, mint function, ownership — gratis</td>
+</tr>
+<tr>
+<td>Holder distribution</td>
+<td><strong>Bubblemaps API</strong> (fallback: query manual on-chain)</td>
+<td>Visualisasi &amp; data top holder</td>
+</tr>
+<tr>
+<td>Price feed real-time</td>
+<td><strong>Birdeye</strong> (Solana) / <strong>DexScreener API</strong> (multi-chain)</td>
+<td>Untuk hitung PnL posisi terbuka</td>
+</tr>
+<tr>
+<td>Telegram bot framework</td>
+<td><strong>grammY</strong></td>
+<td>TypeScript-native, inline keyboard callback lebih rapi dari library lama</td>
+</tr>
+<tr>
+<td>Hosting</td>
+<td><strong>Railway</strong> atau <strong>Fly.io</strong></td>
+<td>Support proses long-running/worker, bukan serverless — dibutuhkan untuk polling terus-menerus</td>
+</tr>
+<tr>
+<td>Secret management</td>
+<td><strong>Doppler</strong> atau env terenkripsi di Railway/Fly</td>
+<td>Private key wallet TIDAK BOLEH masuk <code>.env</code> biasa / ke-commit ke repo</td>
+</tr>
+<tr>
+<td>Dashboard frontend</td>
+<td>Reuse mockup HTML/React yang sudah dibuat</td>
+<td>Tampilkan posisi terbuka, riwayat, breakdown skor</td>
+</tr>
+</tbody>
+</table>
+<p><strong>MVP starter stack (rekomendasi mulai dari sini):</strong> Node.js + TypeScript + BullMQ/Redis + Supabase (Postgres) + Helius + Jupiter + GoPlus + grammY, deploy di Railway. Semua ada free/murah tier untuk testing sebelum commit modal besar.</p>
+<hr>
+<h2>5. Rencana Build Per-Batch</h2>
+<p>Jangan minta Claude Code kerjakan semuanya sekaligus dalam satu prompt — pecah jadi batch di bawah, dan <strong>selesaikan + tes tiap batch dulu sebelum lanjut ke batch berikutnya</strong>. Setiap batch punya &quot;definisi selesai&quot; (acceptance criteria) supaya jelas kapan boleh lanjut.</p>
+<h3>Batch 1 — Project Scaffold &amp; Infra Dasar</h3>
+<ul>
+<li>Setup repo Node.js + TypeScript, struktur folder (<code>/services</code>, <code>/workers</code>, <code>/bot</code>, <code>/db</code>, <code>/dashboard</code>)</li>
+<li>Setup PostgreSQL (Supabase) + migration awal: tabel <code>signals</code>, <code>scores</code>, <code>positions</code>, <code>trades</code>, <code>telegram_interactions</code></li>
+<li>Setup Redis + BullMQ, buat 1 job dummy untuk pastikan queue jalan</li>
+<li>Setup env/secret management (Doppler atau env terenkripsi) — <strong>belum isi private key asli</strong></li>
+<li>✅ Selesai kalau: server nyala, bisa connect ke DB, job dummy di BullMQ berhasil jalan &amp; tercatat di log</li>
+</ul>
+<h3>Batch 2 — Whale Wallet Watcher</h3>
+<ul>
+<li>Integrasi Helius webhook (Solana) dan/atau Alchemy webhook (EVM) sesuai chain yang kamu pilih</li>
+<li>Filter event: hanya swap beli token non-stablecoin/non-blue-chip</li>
+<li>Simpan event mentah ke tabel <code>signals</code> (status: <code>detected</code>)</li>
+<li>Dedupe by <code>tx_hash</code> supaya event yang sama tidak diproses dua kali</li>
+<li>✅ Selesai kalau: transaksi beli dari wallet test masuk ke tabel <code>signals</code> dengan data lengkap (token address, wallet, amount, timestamp), sudah dites pakai wallet asli di jaringan tapi <em>tanpa</em> eksekusi apa pun setelahnya</li>
+</ul>
+<h3>Batch 3 — Token Data Aggregator</h3>
+<ul>
+<li>Begitu ada <code>signals</code> baru, fetch: liquidity + lock status, top holder distribution, contract safety, volume 24 jam, umur token, jumlah holder</li>
+<li>Simpan hasil mentah tiap sumber ke tabel terpisah atau kolom JSON di <code>signals</code></li>
+<li>Handle API gagal/timeout (retry + fallback, jangan crash worker)</li>
+<li>✅ Selesai kalau: untuk 5 token uji coba (campur token bagus &amp; token jelek/rug), semua data metric berhasil ke-fetch dan tersimpan, error handling teruji dengan cara matikan salah satu API key sementara</li>
+</ul>
+<h3>Batch 4 — Scoring Engine</h3>
+<ul>
+<li>Implementasi rumus skor sesuai tabel bobot di bagian 2.3, termasuk hard-fail rules</li>
+<li>Simpan breakdown skor (bukan cuma angka akhir) ke tabel <code>scores</code></li>
+<li>Bikin config file terpisah untuk bobot &amp; threshold (jangan hardcode) supaya gampang diubah nanti</li>
+<li>✅ Selesai kalau: jalankan scoring terhadap 5 token uji Batch 3, hasil skor &amp; breakdown masuk akal secara manual kamu cek satu-satu (token rug dapat skor rendah, token dengan liquidity locked &amp; holder tersebar dapat skor lebih tinggi)</li>
+</ul>
+<h3>Batch 5 — Telegram Bot: Approval Beli</h3>
+<ul>
+<li>Setup bot grammY, kirim alert format sesuai bagian 2.4 (skor, breakdown, liquidity, top10%, link chart, tombol Approve/Skip)</li>
+<li>Implementasi state machine: <code>pending → approved / skipped / timeout_expired</code></li>
+<li>Timeout 2 menit pakai delayed job BullMQ</li>
+<li><strong>Belum ada eksekusi swap asli</strong> — approve/skip cuma update status di DB dan reply ke chat, biar alur approval teruji dulu tanpa risiko dana</li>
+<li>✅ Selesai kalau: skor ≥80 dari Batch 4 memicu alert Telegram, tombol Approve/Skip berfungsi, timeout 2 menit teruji berjalan otomatis kalau didiamkan</li>
+</ul>
+<h3>Batch 6 — Trade Executor (BUY)</h3>
+<ul>
+<li>Integrasi Jupiter API (dan/atau 1inch) untuk eksekusi swap beli</li>
+<li>Ambil parameter: slippage tolerance, max gas/priority fee, position size dari config</li>
+<li>Simpan <code>entry_price</code>, <code>entry_amount</code>, <code>tx_hash</code> ke tabel <code>positions</code> &amp; <code>trades</code> setelah fill</li>
+<li><strong>Test di jumlah sangat kecil / testnet dulu</strong> sebelum posisi ukuran normal</li>
+<li>✅ Selesai kalau: approve dari Batch 5 berhasil trigger swap beli asli di jaringan (jumlah kecil), data posisi tersimpan benar, slippage/gas sesuai config</li>
+</ul>
+<h3>Batch 7 — Position Monitor &amp; Auto-Sell</h3>
+<ul>
+<li>Worker polling harga tiap 10–15 detik untuk semua <code>positions</code> berstatus open</li>
+<li>Logic stop-loss (-20% → auto sell langsung, notifikasi setelah eksekusi)</li>
+<li>Logic take-profit (+100% → alert Sell/Hold, timeout 2 menit → auto-sell, hold → reset ke kelipatan berikutnya)</li>
+<li>✅ Selesai kalau: simulasikan (atau tunggu kejadian asli di jumlah kecil) kedua skenario stop-loss dan take-profit, keduanya berjalan sesuai state machine di bagian 2.7, semua keputusan otomatis tercatat di log dengan alasan</li>
+</ul>
+<h3>Batch 8 — Dashboard &amp; Monitoring</h3>
+<ul>
+<li>Hubungkan dashboard (reuse mockup yang sudah ada) ke data asli: posisi terbuka, riwayat trade, breakdown skor</li>
+<li>Tambah view sederhana untuk evaluasi performa (skor vs hasil aktual) — membantu kamu tuning threshold nanti</li>
+<li>✅ Selesai kalau: dashboard menampilkan data real dari DB, bisa dipakai untuk cek status tanpa buka Telegram/DB manual</li>
+</ul>
+<h3>Batch 9 — Hardening &amp; Keamanan</h3>
+<ul>
+<li>Circuit breaker: hentikan auto-buy baru kalau ada &gt;N stop-loss beruntun dalam 1 jam</li>
+<li>Audit logging lengkap untuk semua keputusan otomatis</li>
+<li>Review penyimpanan private key (pastikan benar-benar tidak plaintext/ke-commit)</li>
+<li>Uji ulang seluruh alur end-to-end dengan dana kecil sebelum scale up</li>
+<li>✅ Selesai kalau: semua checklist keamanan di atas lolos, dan sudah ada minimal 1 siklus penuh (deteksi → skor → approve → beli → stop-loss atau take-profit → jual) berjalan mulus dengan dana kecil</li>
+</ul>
+<hr>
+<h2>6. Hal yang Perlu Kamu Putuskan Sebelum Serah ke Claude Code</h2>
+<ol>
+<li>Chain mana dulu — Solana saja, EVM saja, atau dua-duanya?</li>
+<li>Ukuran posisi per trade (fixed USD atau % portfolio)?</li>
+<li>Slippage tolerance default?</li>
+<li>Perilaku timeout di fase <strong>beli</strong> (bukan take-profit): skip (disarankan) atau auto-buy?</li>
+<li>Sumber approval Telegram — 1 orang (kamu saja) atau ada admin lain?</li>
+</ol>
+
+</body></html>
