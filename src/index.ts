@@ -4,54 +4,55 @@ import { logger } from './services/logger.js';
 import { createServer } from './dashboard/server.js';
 import { startWorkers } from './workers/index.js';
 import { telegramBot } from './bot/telegram.js';
-import { dummyQueue, createDummyWorker } from './workers/queue.js';
+import { settingsService } from './services/settings.js';
+import { ensureTradingWallet } from './services/solana.js';
+import { whaleDiscovery } from './services/discovery.js';
 
 async function bootstrap() {
-  logger.info('Initializing Whale-Signal Trading Bot...');
+  logger.info('Initializing Fins Trade...');
 
-  // 1. Connect Database
+  const isLocalHost = ['127.0.0.1', 'localhost', '::1'].includes(env.HOST);
+  if (!isLocalHost && !env.COCKPIT_PASSWORD && !env.COCKPIT_CONTAINER_BIND) {
+    throw new Error(`HOST=${env.HOST} exposes the cockpit (which can move funds) — set COCKPIT_PASSWORD or use HOST=127.0.0.1`);
+  }
+
+  // 1. Database, settings, trading wallet, watchlist
   await connectDb();
+  const settings = await settingsService.getSettings();
+  const walletAddress = await ensureTradingWallet();
+  await whaleDiscovery.seedEnvWallets();
 
-  // Seed initial curated whale wallets
-  const { whaleDiscovery } = await import('./services/discovery.js');
-  await whaleDiscovery.seedCuratedWallets();
+  // 2. Telegram (re-inits itself when the token/chat changes in the dashboard)
+  telegramBot.start();
+  settingsService.onChange(() => {
+    telegramBot.init().catch((err) => logger.error({ err: err?.message }, 'Telegram re-init failed'));
+  });
 
-  // 2. Start BullMQ Workers
-  const dummyWorker = createDummyWorker();
+  // 3. Background engines (scanner, discovery, pipeline, monitor)
   const workers = startWorkers();
 
-  // Test BullMQ dummy job (Batch 1 acceptance criteria)
-  const dummyJob = await dummyQueue.add('test-batch-1', {
-    message: 'Batch 1 Infrastructure Test Job',
-    timestamp: new Date().toISOString(),
-  });
-  logger.info({ dummyJobId: dummyJob.id }, 'Dispatched Batch 1 dummy verification job');
-
-  // 3. Start Telegram Bot
-  telegramBot.start();
-
-  // 4. Start HTTP Server & Dashboard
+  // 4. HTTP Server & Dashboard
   const app = createServer();
-  const server = app.listen(env.PORT, () => {
-    logger.info(`Server & Dashboard live at http://localhost:${env.PORT}`);
-    logger.info(`Mode: ${env.PAPER_TRADING ? 'PAPER TRADING (Simulation)' : 'LIVE TRADING'}`);
+  const server = app.listen(env.PORT, env.HOST, () => {
+    logger.info(`Cockpit live at http://${env.HOST}:${env.PORT}`);
+    logger.info(`Trading wallet: ${walletAddress} — fund it with SOL`);
+    logger.info(`Mode: ${settings.paperTrading ? 'PAPER TRADING (Simulation)' : 'LIVE TRADING'} · ${settings.autoTradeMode ? 'AUTO' : 'APPROVAL'}`);
   });
 
   // Graceful shutdown
   const shutdown = async () => {
     logger.info('Shutting down services...');
     server.close();
-    await dummyWorker.close();
-    await workers.signalWorker.close();
-    await workers.timeoutWorker.close();
-    await workers.monitorWorker.close();
-    await workers.scannerWorker.close();
+    await telegramBot.stop();
+    await Promise.all(Object.values(workers).map((w) => w.close()));
     await disconnectDb();
     process.exit(0);
   };
 
   process.on('SIGINT', shutdown);
   process.on('SIGTERM', shutdown);
+  // Stay up 24/7: log and keep going on stray async errors instead of crashing
+  process.on('unhandledRejection', (err: any) => logger.error({ err: err?.message || err }, 'Unhandled rejection'));
 }
 
 bootstrap().catch((err) => {

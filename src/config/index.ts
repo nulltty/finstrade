@@ -6,6 +6,14 @@ dotenv.config();
 const envSchema = z.object({
   NODE_ENV: z.enum(['development', 'production', 'test']).default('development'),
   PORT: z.coerce.number().default(3000),
+  // Dashboard can move funds & change settings: bind to localhost unless you put auth in front of it
+  HOST: z.string().default('127.0.0.1'),
+  // Required when HOST is not localhost (e.g. viewing a Mac Studio's cockpit from another PC on the LAN)
+  COCKPIT_PASSWORD: z.string().optional().default(''),
+  // Only for containers whose port is published on 127.0.0.1 by the host (see docker-compose.yml)
+  COCKPIT_CONTAINER_BIND: z.preprocess((v) => v === 'true' || v === true, z.boolean()).default(false),
+  // Master key used to encrypt the trading wallet private key at rest (auto-generated into .secrets/ if empty)
+  SECRETS_KEY: z.string().optional().default(''),
   WEBHOOK_SECRET: z.string().default('super_secret_webhook_key_12345'),
 
   DATABASE_URL: z.string().default('postgresql://postgres:postgres@localhost:5432/whalebot?schema=public'),
@@ -22,6 +30,9 @@ const envSchema = z.object({
   GOPLUS_API_BASE: z.string().default('https://api.gopluslabs.io'),
   DEXSCREENER_API_BASE: z.string().default('https://api.dexscreener.com'),
   BIRDEYE_API_KEY: z.string().optional().default(''),
+  RUGCHECK_API_BASE: z.string().default('https://api.rugcheck.xyz'),
+  JUPITER_API_BASE: z.string().default('https://lite-api.jup.ag'),
+  JUPITER_API_KEY: z.string().optional().default(''),
 
   PAPER_TRADING: z.preprocess((val) => val === 'true' || val === true, z.boolean()).default(true),
   CHAIN: z.enum(['solana', 'evm']).default('solana'),
@@ -48,6 +59,16 @@ const envSchema = z.object({
 });
 
 export const env = envSchema.parse(process.env);
+
+/** Helius RPC is far less rate-limited than the public endpoint; prefer it when a key is configured */
+export const solanaRpcUrl =
+  env.HELIUS_API_KEY && env.SOLANA_RPC_URL.includes('api.mainnet-beta.solana.com')
+    ? `https://mainnet.helius-rpc.com/?api-key=${env.HELIUS_API_KEY}`
+    : env.SOLANA_RPC_URL;
+
+export const WSOL_MINT = 'So11111111111111111111111111111111111111112';
+export const USDC_MINT = 'EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v';
+export const USDT_MINT = 'Es9vMFrzaCERmJfrF4H2FYD4KCoNkY11McCe8BenwNYB';
 
 export const scoringWeights = {
   liquidity: 0.25,

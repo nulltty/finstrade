@@ -1,5 +1,3 @@
-version: '3.8'
-
 services:
   postgres:
     image: postgres:16-alpine
@@ -32,6 +30,27 @@ services:
       interval: 5s
       timeout: 5s
       retries: 5
+
+  bot:
+    build: .
+    container_name: whalebot-app
+    restart: unless-stopped
+    env_file: .env
+    environment:
+      DATABASE_URL: postgresql://postgres:${POSTGRES_PASSWORD:-postgres}@postgres:5432/whalebot?schema=public
+      REDIS_URL: redis://redis:6379
+      HOST: 0.0.0.0
+      COCKPIT_CONTAINER_BIND: "true"
+    ports:
+      # Published on localhost only: the cockpit controls real funds
+      - "127.0.0.1:${PORT:-3000}:3000"
+    volumes:
+      - ./.secrets:/app/.secrets
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
 
 volumes:
   postgres_data:

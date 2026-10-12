@@ -111,4 +111,30 @@ describe('Scoring Engine (Blueprint Section 2.3)', () => {
     expect(result.passedThreshold).toBe(false);
     expect(result.totalScore).toBeLessThan(80);
   });
+
+  it('should hard fail when contract safety could not be fetched, even with good liquidity', () => {
+    const unknown: AggregatedTokenMetrics = {
+      liquidityUsd: 200000, isLiquidityLocked: true, lockedPercentage: 100, top10HoldersPercent: 10,
+      isHoneypot: false, hasMintFunction: false, isOwnershipRenounced: true, contractVerified: false,
+      volume24h: 100000, marketCap: 400000, volumeMcRatio: 0.25, tokenAgeHours: 48, holderCount: 2000,
+      symbol: 'UNK', name: 'Unknown', priceUsd: 0.1,
+    };
+    const result = scoringEngine.calculateScore(unknown);
+    expect(result.isHardFail).toBe(true);
+    expect(result.passedThreshold).toBe(false);
+  });
+
+  it('should hard fail on honeypot reasons from the sell simulation and on excessive price impact', () => {
+    const base: AggregatedTokenMetrics = {
+      liquidityUsd: 120000, isLiquidityLocked: true, lockedPercentage: 99, top10HoldersPercent: 18,
+      isHoneypot: true, honeypotReasons: ['No sell route on Jupiter (cannot exit)'], hasMintFunction: false,
+      isOwnershipRenounced: true, contractVerified: true, volume24h: 80000, marketCap: 250000, volumeMcRatio: 0.32,
+      tokenAgeHours: 48, holderCount: 1200, symbol: 'TRAP', name: 'Trap', priceUsd: 0.05,
+    };
+    const hp = scoringEngine.calculateScore(base);
+    expect(hp.hardFailReasons[0]).toContain('No sell route');
+
+    const impact = scoringEngine.calculateScore({ ...base, isHoneypot: false, honeypotReasons: [], buyPriceImpactPct: 12 }, 80, { maxPriceImpactPct: 5 });
+    expect(impact.isHardFail).toBe(true);
+  });
 });

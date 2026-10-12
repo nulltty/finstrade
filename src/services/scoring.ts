@@ -17,39 +17,54 @@ export interface ScoreResult {
   passedThreshold: boolean;
 }
 
+export interface ScoringOptions {
+  minLiquidityUsd?: number;
+  hardFailMinLiquidity?: number;
+  maxPriceImpactPct?: number;
+}
+
 export class ScoringEngine {
-  calculateScore(metrics: AggregatedTokenMetrics, customThreshold?: number): ScoreResult {
+  calculateScore(metrics: AggregatedTokenMetrics, customThreshold?: number, opts: ScoringOptions = {}): ScoreResult {
     const threshold = customThreshold !== undefined ? customThreshold : env.SCORING_THRESHOLD;
+    const minLiquidity = opts.minLiquidityUsd ?? env.MIN_LIQUIDITY_USD;
+    const hardFailFloor = opts.hardFailMinLiquidity ?? env.HARD_FAIL_MIN_LIQUIDITY_USD;
     const hardFailReasons: string[] = [];
     let isHardFail = false;
 
     // 1. Check Hard Fail Rules
     if (metrics.isHoneypot) {
       isHardFail = true;
-      hardFailReasons.push('Honeypot detected by GoPlus Security API');
+      if (metrics.honeypotReasons?.length) hardFailReasons.push(...metrics.honeypotReasons.map((r) => `Honeypot risk: ${r}`));
+      else hardFailReasons.push('Honeypot detected by GoPlus Security API');
     }
 
-    if (!metrics.isLiquidityLocked && metrics.liquidityUsd < env.HARD_FAIL_MIN_LIQUIDITY_USD) {
+    if (!metrics.isLiquidityLocked && metrics.liquidityUsd < hardFailFloor) {
       isHardFail = true;
-      hardFailReasons.push(`Unlocked liquidity below hard-fail floor ($${metrics.liquidityUsd.toFixed(0)} < $${env.HARD_FAIL_MIN_LIQUIDITY_USD})`);
+      hardFailReasons.push(`Unlocked liquidity below hard-fail floor ($${metrics.liquidityUsd.toFixed(0)} < $${hardFailFloor})`);
     }
 
-    if (!metrics.contractVerified && metrics.liquidityUsd === 0) {
+    // Blueprint §2.3: contract that cannot be fetched/verified is a hard fail
+    if (!metrics.contractVerified) {
       isHardFail = true;
-      hardFailReasons.push('Contract could not be verified and zero liquidity reported');
+      hardFailReasons.push('Contract safety could not be fetched/verified from any source');
+    }
+
+    if (opts.maxPriceImpactPct !== undefined && metrics.buyPriceImpactPct != null && metrics.buyPriceImpactPct > opts.maxPriceImpactPct) {
+      isHardFail = true;
+      hardFailReasons.push(`Price impact for our size too high (${metrics.buyPriceImpactPct.toFixed(1)}% > ${opts.maxPriceImpactPct}%)`);
     }
 
     // 2. Factor: Liquidity locked & size (25%)
     let rawLiquidityScore = 0;
     let liquidityNote = '';
-    if (!metrics.isLiquidityLocked || metrics.liquidityUsd < env.MIN_LIQUIDITY_USD) {
+    if (!metrics.isLiquidityLocked || metrics.liquidityUsd < minLiquidity) {
       rawLiquidityScore = 0;
       liquidityNote = metrics.isLiquidityLocked
-        ? `Liquidity too low ($${metrics.liquidityUsd.toFixed(0)} < $${env.MIN_LIQUIDITY_USD})`
-        : 'Liquidity is not locked';
+        ? `Liquidity too low ($${metrics.liquidityUsd.toFixed(0)} < $${minLiquidity})`
+        : `Liquidity not locked (${metrics.lockedPercentage}% locked/burned)`;
     } else {
       // Scaled from $10k (50 pts) to $100k+ (100 pts)
-      const scaled = 50 + Math.min(50, ((metrics.liquidityUsd - env.MIN_LIQUIDITY_USD) / 90000) * 50);
+      const scaled = 50 + Math.min(50, ((metrics.liquidityUsd - minLiquidity) / 90000) * 50);
       rawLiquidityScore = Math.round(scaled);
       liquidityNote = `Locked ${metrics.lockedPercentage}% with $${metrics.liquidityUsd.toLocaleString()} pool`;
     }
@@ -87,6 +102,14 @@ export class ScoringEngine {
       if (!metrics.contractVerified) {
         rawSafetyScore -= 20;
         safetyIssues.push('Unverified contract');
+      }
+      if ((metrics.transferFeePct || 0) > 0) {
+        rawSafetyScore -= 15;
+        safetyIssues.push(`Transfer fee ${metrics.transferFeePct!.toFixed(1)}%`);
+      }
+      if ((metrics.insidersDetected || 0) > 0) {
+        rawSafetyScore -= 15;
+        safetyIssues.push(`${metrics.insidersDetected} insider networks`);
       }
     }
     rawSafetyScore = Math.max(0, rawSafetyScore);

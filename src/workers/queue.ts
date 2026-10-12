@@ -54,6 +54,15 @@ export const multiWalletScannerQueue = new Queue('multi-wallet-scanner', {
   },
 });
 
+// Discovery runs for minutes; its own queue keeps it from blocking the scanner
+export const whaleDiscoveryQueue = new Queue('whale-discovery', {
+  connection: redisConnection,
+  defaultJobOptions: {
+    removeOnComplete: 20,
+    removeOnFail: 20,
+  },
+});
+
 export const dummyQueue = new Queue('dummy-test', {
   connection: redisConnection,
 });

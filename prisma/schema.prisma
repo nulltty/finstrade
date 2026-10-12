@@ -16,6 +16,9 @@ model Signal {
   tokenName             String?                @map("token_name")
   txHash                String                 @unique @map("tx_hash")
   amountUsd             Float?                 @map("amount_usd")
+  whaleSolSpent         Float?                 @map("whale_sol_spent")
+  whaleTxAt             DateTime?              @map("whale_tx_at")
+  decision              String?                // auto_buy, approval_requested, rejected:<reason>
   status                String                 @default("detected") // detected, aggregated, scored, pending_approval, approved, skipped, timeout_expired, executing_buy, bought, failed
   rawTx                 Json?                  @map("raw_tx")
   rawMetrics            Json?                  @map("raw_metrics")
@@ -52,13 +55,22 @@ model Position {
   tokenSymbol           String?                @map("token_symbol")
   entryPrice            Float                  @map("entry_price")
   entryAmount           Float                  @map("entry_amount")
+  entryRawAmount        String?                @map("entry_raw_amount")
+  tokenDecimals         Int?                   @map("token_decimals")
+  costUsd               Float                  @default(0) @map("cost_usd")
+  costSol               Float                  @default(0) @map("cost_sol")
+  proceedsUsd           Float?                 @map("proceeds_usd")
+  whaleWallet           String?                @map("whale_wallet")
+  isPaper               Boolean                @default(true) @map("is_paper")
+  peakPrice             Float                  @default(0) @map("peak_price")
+  trailingActive        Boolean                @default(false) @map("trailing_active")
   currentPrice          Float                  @map("current_price")
   pnlPercent            Float                  @default(0) @map("pnl_percent")
   highestPnlPercent     Float                  @default(0) @map("highest_pnl_percent")
   nextTpThreshold       Float                  @default(100) @map("next_tp_threshold")
-  status                String                 @default("open") // open, closed
+  status                String                 @default("open") // open, closing, closed
   exitPrice             Float?                 @map("exit_price")
-  exitReason            String?                @map("exit_reason") // stop_loss, take_profit_approved, take_profit_timeout, manual
+  exitReason            String?                @map("exit_reason") // stop_loss, trailing_stop, take_profit_auto, take_profit_approved, take_profit_timeout, whale_exit, manual
   openedAt              DateTime               @default(now()) @map("opened_at")
   closedAt              DateTime?              @map("closed_at")
   updatedAt             DateTime               @updatedAt @map("updated_at")
@@ -80,6 +92,7 @@ model Trade {
   price                 Float
   amount                Float
   totalUsd              Float                  @map("total_usd")
+  solAmount             Float?                 @map("sol_amount")
   txHash                String                 @map("tx_hash")
   status                String                 @default("confirmed") // pending, confirmed, failed
   slippageBps           Int?                   @map("slippage_bps")
@@ -132,6 +145,17 @@ model WatchedWallet {
   lastScannedAt         DateTime?              @map("last_scanned_at")
   lastTxHash            String?                @map("last_tx_hash")
   discoveredVia         String?                @map("discovered_via")
+  profileStatus         String                 @default("candidate") @map("profile_status") // candidate, qualified, rejected
+  profileReason         String?                @map("profile_reason")
+  tradesAnalyzed        Int                    @default(0) @map("trades_analyzed")
+  closedTrades          Int                    @default(0) @map("closed_trades")
+  wins                  Int                    @default(0)
+  losses                Int                    @default(0)
+  realizedPnlSol        Float                  @default(0) @map("realized_pnl_sol")
+  avgHoldMinutes        Float?                 @map("avg_hold_minutes")
+  whaleScore            Float                  @default(0) @map("whale_score")
+  lastProfiledAt        DateTime?              @map("last_profiled_at")
+  signalsTriggered      Int                    @default(0) @map("signals_triggered")
   createdAt             DateTime               @default(now()) @map("created_at")
   updatedAt             DateTime               @updatedAt @map("updated_at")
 
@@ -161,6 +185,19 @@ model BotSetting {
   autoScanIntervalSec   Int                    @default(20) @map("auto_scan_interval_sec")
   autoDiscoveryEnabled  Boolean                @default(true) @map("auto_discovery_enabled")
   autoDiscoveryIntervalMin Int                 @default(60) @map("auto_discovery_interval_min")
+
+  autoTradeMode         Boolean                @default(true) @map("auto_trade_mode")
+  trailingStopPercent   Float                  @default(15.0) @map("trailing_stop_percent")
+  copySellEnabled       Boolean                @default(true) @map("copy_sell_enabled")
+  positionSizeMode      String                 @default("fixed_usd") @map("position_size_mode") // fixed_usd, percent_balance
+  positionSizePercent   Float                  @default(5.0) @map("position_size_percent")
+  solReserve            Float                  @default(0.02) @map("sol_reserve")
+  minWhaleWinRate       Float                  @default(60.0) @map("min_whale_win_rate")
+  minWhaleClosedTrades  Int                    @default(5) @map("min_whale_closed_trades")
+  minWhaleBuyUsd        Float                  @default(300.0) @map("min_whale_buy_usd")
+  maxSignalAgeSec       Int                    @default(300) @map("max_signal_age_sec")
+  maxPriceImpactPct     Float                  @default(5.0) @map("max_price_impact_pct")
+  maxRoundTripLossPct   Float                  @default(15.0) @map("max_round_trip_loss_pct")
 
   mySolanaWallet        String?                @map("my_solana_wallet")
   mySolanaPrivateKey    String?                @map("my_solana_private_key")

@@ -1,0 +1,1128 @@
+<!DOCTYPE html>
+<html lang="id">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Fins Trade</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Archivo:wght@400;500;600&family=Instrument+Serif:ital@0;1&family=Geist+Mono:wght@400;500;700&family=Inter:wght@400;500;600&display=swap" rel="stylesheet">
+<style>
+  /* Paper / editorial theme — warm stock, ink rules, square corners, no glow */
+  :root {
+    color-scheme: light;
+    --bg: #f2f1ee;          /* paper */
+    --surface: #faf9f7;     /* raised sheet */
+    --surface-2: #f6f5f2;
+    --surface-3: #e9e8e4;   /* sunken */
+    --line: rgba(16,16,20,.16);
+    --line-strong: rgba(16,16,20,.4);
+    --text: #101014;        /* ink */
+    --ink-strong: #000;
+    --text-2: rgba(16,16,20,.72);
+    --muted: rgba(16,16,20,.56);
+    --faint: rgba(16,16,20,.08);
+    --invert-bg: #101014;
+    --invert-fg: #f2f1ee;
+    --neon: #2d81ff;        /* accent */
+    --accent-ink: #1659c4;
+    --neon-dim: rgba(45,129,255,.14);
+    --violet: #8b5cf6;
+    --series-1: #2d81ff;
+    --series-fill: rgba(45,129,255,.16);
+    --good: #1f9d55;
+    --warn: #b56d00;
+    --serious: #e8573f;
+    --bad: #b3261e;
+    --scanline: rgba(16,16,20,.03);
+    --display: 'Archivo', system-ui, sans-serif;
+    --serif: 'Instrument Serif', Georgia, serif;
+    --mono: 'Geist Mono', ui-monospace, SFMono-Regular, Menlo, monospace;
+    --body: 'Inter', system-ui, sans-serif;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root:not([data-theme="light"]) {
+      color-scheme: dark;
+      --bg: #121316; --surface: #18191d; --surface-2: #15161a; --surface-3: #0c0c0e;
+      --line: rgba(242,241,238,.15); --line-strong: rgba(242,241,238,.4);
+      --text: #f2f1ee; --ink-strong: #fff; --text-2: rgba(242,241,238,.75); --muted: rgba(242,241,238,.55); --faint: rgba(242,241,238,.06);
+      --invert-bg: #f2f1ee; --invert-fg: #0b0b0c;
+      --neon: #74aaff; --accent-ink: #74aaff; --neon-dim: rgba(116,170,255,.16); --violet: #b69cff;
+      --series-1: #3987e5; --series-fill: rgba(57,135,229,.2);
+      --good: #199e70; --warn: #ffb347; --serious: #ff8a70; --bad: #e66767;
+      --scanline: rgba(255,255,255,.025);
+    }
+  }
+  :root[data-theme="dark"] {
+    color-scheme: dark;
+    --bg: #121316; --surface: #18191d; --surface-2: #15161a; --surface-3: #0c0c0e;
+    --line: rgba(242,241,238,.15); --line-strong: rgba(242,241,238,.4);
+    --text: #f2f1ee; --ink-strong: #fff; --text-2: rgba(242,241,238,.75); --muted: rgba(242,241,238,.55); --faint: rgba(242,241,238,.06);
+    --invert-bg: #f2f1ee; --invert-fg: #0b0b0c;
+    --neon: #74aaff; --accent-ink: #74aaff; --neon-dim: rgba(116,170,255,.16); --violet: #b69cff;
+    --series-1: #3987e5; --series-fill: rgba(57,135,229,.2);
+    --good: #199e70; --warn: #ffb347; --serious: #ff8a70; --bad: #e66767;
+    --scanline: rgba(255,255,255,.025);
+  }
+  * { box-sizing: border-box; scrollbar-color: var(--line-strong) transparent; scrollbar-width: thin; }
+  html, body { margin: 0; }
+  body {
+    background: var(--bg);
+    color: var(--text);
+    font: 14px/1.5 var(--body);
+    padding: 0 clamp(16px, 3vw, 40px) 56px;
+    min-height: 100vh;
+    -webkit-font-smoothing: antialiased;
+  }
+  body::before { /* faint ruled-paper scanlines */
+    content: ''; position: fixed; inset: 0; pointer-events: none; z-index: 0;
+    background: repeating-linear-gradient(0deg, var(--scanline) 0 1px, transparent 1px 4px);
+  }
+  body::after { /* paper grain */
+    content: ''; position: fixed; inset: 0; pointer-events: none; z-index: 0; opacity: .35; mix-blend-mode: multiply;
+    background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='160' height='160'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='.9' numOctaves='2' stitchTiles='stitch'/%3E%3CfeColorMatrix values='0 0 0 0 0.06 0 0 0 0 0.06 0 0 0 0 0.08 0 0 0 .05 0'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23n)'/%3E%3C/svg%3E");
+  }
+  main, header, .masthead, .ticker { position: relative; z-index: 1; }
+  .mono { font-family: var(--mono); }
+  .muted { color: var(--muted); }
+  .t2 { color: var(--text-2); }
+  .up { color: var(--good); }
+  .down { color: var(--bad); }
+  .warnc { color: var(--warn); }
+  em, .serif { font-family: var(--serif); font-style: italic; font-weight: 400; }
+  a { color: var(--text); text-decoration: underline; text-decoration-color: var(--line-strong); text-underline-offset: 3px; }
+  a:hover { text-decoration-color: var(--text); }
+
+  /* ── Top bar ── */
+  .hud {
+    display: flex; flex-wrap: wrap; align-items: center; gap: 10px 18px;
+    margin: 0 calc(-1 * clamp(16px, 3vw, 40px)); padding: 12px clamp(16px, 3vw, 40px);
+    padding-top: calc(12px + env(safe-area-inset-top, 0px));
+    background: color-mix(in srgb, var(--bg) 88%, transparent); backdrop-filter: blur(8px);
+    border-bottom: 1px solid var(--line);
+    position: sticky; top: 0; z-index: 20;
+  }
+  .brand { display: flex; align-items: center; gap: 10px; }
+  .brand .logo {
+    width: 28px; height: 28px; display: grid; place-items: center;
+    background: var(--invert-bg); color: var(--invert-fg); font: 600 14px var(--serif);
+  }
+  .brand h1 { margin: 0; font: 600 16px var(--display); letter-spacing: -.02em; color: var(--ink-strong); }
+  .brand h1 em { color: var(--muted); }
+  .brand small { display: none; }
+  .pill {
+    display: inline-flex; align-items: center; gap: 6px; padding: 3px 8px;
+    font: 700 10.5px var(--mono); letter-spacing: .12em; text-transform: uppercase;
+    border: 1px solid var(--line-strong); color: var(--text-2);
+  }
+  .pill.live { background: var(--bad); border-color: var(--bad); color: #fff; }
+  .pill.paper { border-style: dashed; color: var(--text); }
+  .pill.auto { background: var(--invert-bg); border-color: var(--invert-bg); color: var(--invert-fg); }
+  .pill.ok { color: var(--good); border-color: currentColor; }
+  .pill.halt { background: var(--bad); border-color: var(--bad); color: #fff; }
+  .engines { display: flex; flex-wrap: wrap; gap: 4px 14px; }
+  .engine { display: flex; align-items: center; gap: 6px; font: 500 11px var(--mono); color: var(--text-2); letter-spacing: .04em; }
+  .led { width: 7px; height: 7px; border-radius: 50%; border: 1px solid var(--line-strong); }
+  .led.on { background: var(--good); border-color: var(--good); animation: pulse 2.4s infinite; }
+  .led.stale { background: var(--warn); border-color: var(--warn); }
+  .led.err { background: var(--bad); border-color: var(--bad); }
+  @keyframes pulse { 50% { opacity: .35; } }
+  .hud .spacer { flex: 1; }
+  .clock { font: 500 13px var(--mono); color: var(--text); letter-spacing: .04em; }
+
+  button {
+    font: 700 11px var(--mono); letter-spacing: .12em; text-transform: uppercase; cursor: pointer;
+    color: var(--text); background: transparent; border: 1px solid var(--line-strong); border-radius: 0; padding: 8px 12px;
+    transition: background .15s, color .15s, border-color .15s;
+  }
+  button:hover { background: var(--text); color: var(--bg); border-color: var(--text); }
+  button.primary { background: var(--invert-bg); color: var(--invert-fg); border-color: var(--invert-bg); }
+  button.primary:hover { opacity: .85; }
+  button.danger { color: var(--bad); border-color: var(--bad); }
+  button.danger:hover { background: var(--bad); color: #fff; }
+  button.sm { padding: 4px 8px; font-size: 10px; }
+  button:disabled { opacity: .4; cursor: default; }
+  button:focus-visible, input:focus-visible, select:focus-visible { outline: 2px solid var(--neon); outline-offset: 2px; }
+
+  /* ── Masthead ── */
+  .masthead { padding: clamp(28px, 6vw, 64px) 0 clamp(18px, 3vw, 28px); border-bottom: 1px solid var(--line); }
+  .masthead .kicker { font: 500 11px var(--mono); letter-spacing: .14em; text-transform: uppercase; color: var(--muted); }
+  .masthead h2 {
+    margin: 14px 0 0; max-width: 18ch; font: 500 clamp(36px, 6.4vw, 76px)/1 var(--display); letter-spacing: -.04em; color: var(--ink-strong);
+  }
+  .masthead h2 em { color: var(--muted); }
+  .masthead p { max-width: 62ch; margin: 16px 0 0; color: var(--text-2); font-size: 15px; }
+
+  /* ── Ticker ── */
+  .ticker { overflow: hidden; border-bottom: 1px solid var(--line); padding: 10px 0; white-space: nowrap;
+    mask-image: linear-gradient(90deg, transparent, #000 6%, #000 94%, transparent); }
+  .ticker-track { display: inline-flex; gap: 36px; animation: tick 60s linear infinite; font: 500 11.5px var(--mono); color: var(--text-2); }
+  .ticker-track span::before { content: '●'; margin-right: 10px; font-size: 7px; vertical-align: 2px; color: var(--muted); }
+  .ticker-track span.good::before { color: var(--good); } .ticker-track span.bad::before { color: var(--bad); }
+  .ticker:hover .ticker-track { animation-play-state: paused; }
+  @keyframes tick { to { transform: translateX(-50%); } }
+  @media (prefers-reduced-motion: reduce) { .ticker-track { animation: none; } .led.on { animation: none; } }
+
+  /* ── Layout ── */
+  main { display: grid; gap: 0; margin-top: 0; grid-template-columns: repeat(12, minmax(0, 1fr)); counter-reset: sec;
+    border-left: 1px solid var(--line); }
+  .panel {
+    grid-column: span 12; background: transparent; min-width: 0; position: relative;
+    padding: 22px clamp(14px, 2vw, 26px) 26px; border-right: 1px solid var(--line); border-bottom: 1px solid var(--line);
+  }
+  .panel > h2:first-child { counter-increment: sec; }
+  .panel > h2:first-child::before {
+    content: counter(sec, decimal-leading-zero) '/'; font: 500 11px var(--mono); color: var(--muted); letter-spacing: .08em; margin-right: 4px;
+  }
+  .panel h2 {
+    margin: 0 0 16px; font: 500 22px/1.15 var(--display); letter-spacing: -.02em; color: var(--ink-strong);
+    display: flex; align-items: baseline; gap: 10px; flex-wrap: wrap;
+  }
+  .panel h2 .tag { font: 400 15px var(--serif); font-style: italic; color: var(--muted); letter-spacing: 0; }
+  .panel h2 .right { margin-left: auto; display: flex; gap: 6px; flex-wrap: wrap; align-items: center; }
+  @media (min-width: 1100px) {
+    .c3 { grid-column: span 3; } .c4 { grid-column: span 4; } .c5 { grid-column: span 5; }
+    .c6 { grid-column: span 6; } .c7 { grid-column: span 7; } .c8 { grid-column: span 8; }
+  }
+  @media (min-width: 720px) and (max-width: 1099px) { .c3, .c4, .c5, .c6 { grid-column: span 6; } }
+
+  /* ── Wallet strip ── */
+  .wallet { display: flex; flex-wrap: wrap; gap: 18px 40px; align-items: flex-end; }
+  .wallet .addr { font: 500 13px var(--mono); word-break: break-all; }
+  .wallet .big { font: 500 30px/1 var(--display); letter-spacing: -.03em; color: var(--ink-strong); }
+  .wallet .lbl, .kpi .lbl, th, .field label {
+    font: 500 10.5px var(--mono); letter-spacing: .14em; text-transform: uppercase; color: var(--muted);
+  }
+  .wallet .lbl { margin-bottom: 6px; }
+  .fund-hint {
+    flex-basis: 100%; padding: 10px 14px; border: 1px dashed var(--line-strong); background: var(--surface);
+    color: var(--text-2); font-size: 13px;
+  }
+
+  /* ── KPI tiles ── */
+  .kpis { display: grid; grid-template-columns: repeat(auto-fit, minmax(150px, 1fr)); border-top: 1px solid var(--line); border-left: 1px solid var(--line); }
+  .kpi { padding: 14px 16px 16px; border-right: 1px solid var(--line); border-bottom: 1px solid var(--line); background: var(--surface); }
+  .kpi .val { font: 500 27px/1.1 var(--display); overflow: hidden; text-overflow: ellipsis; letter-spacing: -.035em; margin-top: 8px; white-space: nowrap; color: var(--ink-strong); }
+  .kpi .val .up, .kpi .val .down { color: inherit; }
+  .kpi .val .up::before { content: '▲ '; font-size: .45em; vertical-align: .35em; color: var(--good); }
+  .kpi .val .down::before { content: '▼ '; font-size: .45em; vertical-align: .35em; color: var(--bad); }
+  .kpi .sub { font: italic 400 14px var(--serif); color: var(--muted); margin-top: 2px; }
+  .meter { height: 3px; background: var(--surface-3); margin-top: 10px; }
+  .meter > i { display: block; height: 100%; background: var(--text); }
+
+  /* ── Tables ── */
+  .tbl-wrap { overflow-x: auto; }
+  table { width: 100%; border-collapse: collapse; font-size: 13px; }
+  th { text-align: left; padding: 8px 10px; border-bottom: 1px solid var(--line-strong); white-space: nowrap; font-weight: 500; }
+  td { padding: 9px 10px; border-bottom: 1px solid var(--line); vertical-align: middle; white-space: nowrap; }
+  tr:hover td { background: var(--faint); }
+  td.num, th.num { text-align: right; font-family: var(--mono); font-size: 12px; }
+  .empty { padding: 28px; text-align: center; color: var(--muted); font: italic 400 17px var(--serif); }
+  .badge {
+    display: inline-block; padding: 2px 6px; font: 700 9.5px var(--mono); letter-spacing: .1em; text-transform: uppercase;
+    border: 1px solid var(--line-strong); color: var(--text-2);
+  }
+  .badge.good { color: var(--good); border-color: currentColor; }
+  .badge.bad { color: var(--bad); border-color: currentColor; }
+  .badge.warn { color: var(--warn); border-color: currentColor; border-style: dashed; }
+  .badge.neon { color: var(--accent-ink); border-color: currentColor; }
+
+  .gauge { position: relative; width: 140px; height: 6px; background: var(--surface-3); }
+  .gauge .zero { position: absolute; top: -4px; bottom: -4px; width: 1px; background: var(--text); }
+  .gauge .fill { position: absolute; top: 0; bottom: 0; }
+  .gauge .peak { position: absolute; top: -4px; width: 2px; height: 14px; background: var(--violet); }
+
+  /* ── Signals feed ── */
+  .feed { display: flex; flex-direction: column; max-height: 520px; overflow-y: auto; border-top: 1px solid var(--line); }
+  .sig {
+    display: grid; grid-template-columns: 46px 1fr auto; gap: 12px; align-items: center;
+    padding: 10px 8px; border-bottom: 1px solid var(--line); cursor: pointer; background: transparent;
+  }
+  .sig:hover { background: var(--faint); }
+  .sig.sel { background: var(--surface); box-shadow: inset 3px 0 0 var(--text); }
+  .ring { width: 42px; height: 42px; }
+  .sig .sym { font: 600 15px var(--display); letter-spacing: -.01em; }
+  .sig .meta { font: 500 11px var(--mono); color: var(--muted); }
+
+  /* ── Inspector ── */
+  .checks { display: grid; grid-template-columns: repeat(auto-fit, minmax(220px, 1fr)); border-top: 1px solid var(--line); border-left: 1px solid var(--line); }
+  .check { display: flex; gap: 10px; align-items: flex-start; padding: 9px 11px; border-right: 1px solid var(--line); border-bottom: 1px solid var(--line); font-size: 13px; background: var(--surface); }
+  .check .ic { font: 700 12px var(--mono); width: 16px; flex: none; }
+  .check.pass .ic { color: var(--good); } .check.fail .ic { color: var(--bad); } .check.unk .ic { color: var(--warn); }
+  .check.fail { background: color-mix(in srgb, var(--bad) 6%, var(--surface)); }
+  .check .v { font-family: var(--mono); color: var(--muted); font-size: 11px; }
+  .factor { display: grid; grid-template-columns: 140px 1fr 44px; gap: 12px; align-items: center; margin: 8px 0; }
+  .factor .bar { height: 6px; background: var(--surface-3); }
+  .factor .bar i { display: block; height: 100%; background: var(--series-1); }
+  .factor .note { grid-column: 2 / 4; font: italic 400 14px var(--serif); color: var(--muted); margin-top: -4px; }
+  .hardfail { padding: 10px 12px; border: 1px solid var(--bad); color: var(--bad); font-size: 13px; margin-bottom: 12px; background: var(--surface); }
+  .score-big { font: 500 56px/1 var(--display); letter-spacing: -.05em; color: var(--ink-strong); }
+
+  /* ── Live readiness ── */
+  .ready-head { display: flex; flex-wrap: wrap; gap: 14px 28px; align-items: flex-end; margin-bottom: 18px; }
+  .ready-verdict { font: 500 clamp(26px, 3.4vw, 40px)/1.05 var(--display); letter-spacing: -.035em; color: var(--ink-strong); max-width: 22ch; }
+  .ready-verdict em { color: var(--muted); }
+  .ready-progress { flex: 1; min-width: 220px; }
+  .ready-progress .bar { display: flex; gap: 3px; margin-top: 8px; }
+  .ready-progress .bar i { flex: 1; height: 8px; background: var(--surface-3); }
+  .ready-progress .bar i.pass { background: var(--good); }
+  .ready-progress .bar i.fail { background: var(--bad); }
+  .ready-group { font: 500 10.5px var(--mono); letter-spacing: .14em; text-transform: uppercase; color: var(--muted); margin: 16px 0 6px; }
+  .check.pending .ic { color: var(--muted); }
+  .check.manual .ic { color: var(--warn); }
+  .check .tgt { font: 500 10.5px var(--mono); color: var(--muted); }
+  .ready-actions { display: flex; gap: 8px; flex-wrap: wrap; margin-top: 18px; align-items: center; }
+  a.btn { display: inline-block; font: 700 11px var(--mono); letter-spacing: .12em; text-transform: uppercase; text-decoration: none;
+    color: var(--text); border: 1px solid var(--line-strong); padding: 8px 12px; }
+  a.btn:hover { background: var(--text); color: var(--bg); }
+
+  /* ── Charts ── */
+  .chart { position: relative; width: 100%; height: 240px; }
+  .chart canvas { width: 100%; height: 100%; display: block; }
+  .tip {
+    position: absolute; pointer-events: none; padding: 7px 10px; font: 500 11px var(--mono);
+    background: var(--invert-bg); color: var(--invert-fg); white-space: nowrap; z-index: 5;
+  }
+  .tip .muted { color: inherit; opacity: .6; }
+  .tip .up, .tip .down { color: inherit; }
+  .legend { display: flex; gap: 16px; flex-wrap: wrap; font: 500 11px var(--mono); color: var(--text-2); margin-top: 10px; }
+  .legend i { display: inline-block; width: 9px; height: 9px; border-radius: 50%; margin-right: 6px; vertical-align: 0; }
+
+  .funnel-row { display: grid; grid-template-columns: 130px 1fr 44px; gap: 12px; align-items: center; margin: 9px 0; font-size: 13px; }
+  .funnel-row .bar { height: 12px; background: var(--surface-3); }
+  .funnel-row .bar i { display: block; height: 100%; background: var(--series-1); }
+
+  /* ── Decision log ── */
+  .term { font: 400 12px/1.7 var(--mono); border-top: 1px solid var(--line); height: 340px; overflow-y: auto; }
+  .term .ln { display: grid; grid-template-columns: 76px 200px 1fr; gap: 14px; padding: 4px 0; border-bottom: 1px dotted var(--line); }
+  .term .ts { color: var(--muted); }
+  .term .act { font-weight: 600; overflow: hidden; text-overflow: ellipsis; letter-spacing: .02em; }
+  .term .act.bad { color: var(--bad); } .term .act.good { color: var(--good); } .term .act.warn { color: var(--warn); }
+  @media (max-width: 700px) { .term .ln { grid-template-columns: 1fr; gap: 0; } }
+
+  /* ── Forms / drawer ── */
+  input, select {
+    font: 500 13px var(--mono); color: var(--text); background: var(--surface); border: 1px solid var(--line-strong);
+    border-radius: 0; padding: 8px 10px; width: 100%;
+  }
+  input:focus, select:focus { outline: none; border-color: var(--text); }
+  .add-row { display: grid; grid-template-columns: 2fr 1fr auto; gap: 8px; margin-bottom: 14px; }
+  @media (max-width: 600px) { .add-row { grid-template-columns: 1fr; } }
+  .drawer-bg { position: fixed; inset: 0; background: rgba(16,16,20,.35); z-index: 40; }
+  .drawer {
+    position: fixed; top: 0; right: 0; bottom: 0; width: min(580px, 100%); z-index: 41; overflow-y: auto;
+    background: var(--bg); border-left: 1px solid var(--line-strong); padding: 22px 22px calc(28px + env(safe-area-inset-bottom, 0px));
+    padding-top: calc(22px + env(safe-area-inset-top, 0px));
+  }
+  .drawer h3 { font: 500 10.5px var(--mono); letter-spacing: .14em; color: var(--muted); margin: 22px 0 10px; padding-bottom: 6px; border-bottom: 1px solid var(--line); }
+  .fgrid { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; }
+  @media (max-width: 500px) { .fgrid { grid-template-columns: 1fr; } }
+  .field label { display: block; margin-bottom: 5px; }
+  .field .help, .switch .help { font: italic 400 14px var(--serif); color: var(--muted); margin-top: 2px; }
+  .switch { display: flex; align-items: center; gap: 12px; padding: 10px 12px; border: 1px solid var(--line); cursor: pointer; background: var(--surface); }
+  .switch input { width: auto; accent-color: var(--text); }
+  .confirm-box { margin-top: 12px; padding: 12px; border: 1px solid var(--bad); font-size: 13px; background: var(--surface); }
+
+  .toast {
+    position: fixed; right: 18px; bottom: calc(18px + env(safe-area-inset-bottom, 0px)); z-index: 60;
+    background: var(--invert-bg); color: var(--invert-fg); padding: 11px 16px; font: 500 12px var(--mono);
+  }
+  .toast.err { background: var(--bad); color: #fff; }
+  .row-actions { display: flex; gap: 4px; }
+  footer { position: relative; z-index: 1; display: flex; flex-wrap: wrap; gap: 8px 24px; justify-content: space-between;
+    padding: 22px 0 0; font: 500 11px var(--mono); color: var(--muted); letter-spacing: .06em; }
+</style>
+</head>
+<body>
+<header class="hud">
+  <div class="brand">
+    <div class="logo">F</div>
+    <h1>Fins <em>Trade</em></h1>
+  </div>
+  <span id="pillMode" class="pill">—</span>
+  <span id="pillAuto" class="pill">—</span>
+  <span id="pillCb" class="pill">—</span>
+  <div class="engines" id="engines"></div>
+  <div class="spacer"></div>
+  <div class="mono muted" id="uptime" style="font-size:11px">uptime —</div>
+  <div class="clock" id="clock">--:--:--</div>
+  <button class="danger" id="btnKill" title="Hentikan semua BUY baru (circuit breaker)">Halt buys</button>
+  <button class="primary" id="btnSettings">Settings</button>
+</header>
+
+<section class="masthead">
+  <div class="kicker" id="mastKicker">Whale-signal autopilot · Solana</div>
+  <h2 id="mastHead">Whales move first. <em>We follow, carefully.</em></h2>
+  <p id="mastSub">Bot mencari wallet yang terbukti profit, memeriksa setiap koin yang mereka beli, dan hanya ikut masuk kalau semua cek keamanan lolos.</p>
+</section>
+<div class="ticker" aria-label="Aktivitas terbaru"><div class="ticker-track" id="ticker"></div></div>
+
+<main>
+  <!-- Wallet -->
+  <section class="panel">
+    <h2>Trading wallet <span class="tag">khusus bot — isi SOL ke alamat ini</span>
+      <span class="right"><button class="sm" id="btnCopy">Copy address</button></span></h2>
+    <div class="wallet">
+      <div><div class="lbl">Address</div><div class="addr" id="wAddr">—</div></div>
+      <div><div class="lbl">Balance</div><div class="big" id="wSol">—</div></div>
+      <div><div class="lbl">Value</div><div class="big t2" id="wUsd">—</div></div>
+      <div><div class="lbl">SOL / USD</div><div class="big t2" id="wPrice">—</div></div>
+      <div><div class="lbl">RPC</div><div class="big t2" id="wRpc">—</div></div>
+      <div class="fund-hint" id="fundHint" hidden></div>
+    </div>
+  </section>
+
+  <!-- KPIs -->
+  <section class="panel">
+    <div class="kpis" id="kpis"></div>
+  </section>
+
+  <!-- Live readiness -->
+  <section class="panel" id="readiness">
+    <h2>Live readiness <span class="tag">kapan aman mematikan paper mode</span><span class="right mono muted" style="font-size:11px" id="readyHaircut"></span></h2>
+    <div class="ready-head">
+      <div class="ready-verdict" id="readyVerdict">Menghitung…</div>
+      <div class="ready-progress"><div class="mono muted" style="font-size:11px" id="readyCount"></div><div class="bar" id="readyBar"></div></div>
+    </div>
+    <div id="readyChecks"></div>
+    <div class="ready-actions">
+      <button class="primary" id="btnCopyReport">Copy report for AI</button>
+      <a class="btn" href="/api/readiness/export" download>Download report</a>
+      <span class="serif muted" style="font-size:15px">Tempel bersama <span class="mono" style="font-style:normal;font-size:12px">prompts/live-readiness-review.md</span> ke AI lain untuk second opinion.</span>
+    </div>
+  </section>
+
+  <!-- Equity + funnel -->
+  <section class="panel c8">
+    <h2>Equity curve <span class="tag">realised PnL, per trade yang ditutup</span></h2>
+    <div class="chart" id="equityChart"><canvas></canvas></div>
+  </section>
+  <section class="panel c4">
+    <h2>Signal pipeline <span class="tag">24 jam terakhir</span></h2>
+    <div id="funnel"></div>
+    <div class="mono muted" style="margin-top:10px;font-size:11px" id="queueInfo"></div>
+  </section>
+
+  <!-- Positions -->
+  <section class="panel">
+    <h2>Open positions <span class="tag" id="posTag"></span>
+      <span class="right mono muted" style="font-size:11px" id="gaugeLegend"></span></h2>
+    <div class="tbl-wrap" id="positions"></div>
+  </section>
+
+  <!-- Signals + inspector -->
+  <section class="panel c5">
+    <h2>Signal feed <span class="tag">klik untuk inspeksi</span>
+      <span class="right"><button class="sm" id="btnSim" title="Sinyal simulasi — selalu paper">Simulate</button></span></h2>
+    <div class="feed" id="feed"></div>
+  </section>
+  <section class="panel c7">
+    <h2>Safety inspector <span class="tag" id="inspTag">pilih sinyal</span><span class="right" id="inspActions"></span></h2>
+    <div id="inspector" class="empty">Pilih sinyal di feed untuk melihat semua cek keamanan.</div>
+  </section>
+
+  <!-- Whale radar -->
+  <section class="panel">
+    <h2>Whale radar <span class="tag" id="whaleTag"></span>
+      <span class="right">
+        <select id="whaleFilter" style="width:auto">
+          <option value="active">Active</option>
+          <option value="qualified">Qualified</option>
+          <option value="candidate">Candidates</option>
+          <option value="rejected">Rejected</option>
+          <option value="all">All</option>
+        </select>
+        <button class="sm" id="btnDiscover">Discover now</button>
+        <button class="sm" id="btnScan">Scan now</button>
+      </span></h2>
+    <div class="add-row">
+      <input id="newAddr" placeholder="Tambah wallet whale manual (Solana address)">
+      <input id="newLabel" placeholder="Label">
+      <button class="primary" id="btnAdd">Add &amp; profile</button>
+    </div>
+    <div class="tbl-wrap" id="whales"></div>
+  </section>
+
+  <!-- Performance -->
+  <section class="panel c6">
+    <h2>Score <em>vs</em> outcome <span class="tag">tiap titik = satu trade yang ditutup</span></h2>
+    <div class="chart" id="scatterChart"><canvas></canvas></div>
+    <div class="legend"><span><i style="background:var(--good)"></i>▲ profit</span><span><i style="background:var(--bad)"></i>▼ loss</span><span id="thresholdLbl"></span></div>
+  </section>
+  <section class="panel c6">
+    <h2>Exit reasons <span class="tag">sepanjang waktu</span></h2>
+    <div id="exits"></div>
+    <h2 style="margin-top:26px;font-size:17px">Recent trades</h2>
+    <div class="tbl-wrap" id="trades" style="max-height:220px;overflow-y:auto"></div>
+  </section>
+
+  <!-- Audit terminal -->
+  <section class="panel">
+    <h2>Decision log <span class="tag">setiap keputusan otomatis, dengan alasannya</span></h2>
+    <div class="term" id="term"></div>
+  </section>
+</main>
+
+<footer class="wrap-foot"><span>Fins Trade — paper first, live when proven.</span><span id="footInfo"></span></footer>
+<div id="drawerBg" class="drawer-bg" hidden></div>
+<aside id="drawer" class="drawer" hidden></aside>
+<div id="toast" class="toast" hidden></div>
+
+<script>
+const $ = (id) => document.getElementById(id);
+const esc = (s) => String(s ?? '').replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
+const short = (a) => a ? `${a.slice(0, 4)}…${a.slice(-4)}` : '—';
+const fmtUsd = (n, d = 2) => n == null || isNaN(n) ? '—' : (n < 0 ? '−$' : '$') + Math.abs(n).toLocaleString('en-US', { minimumFractionDigits: d, maximumFractionDigits: d });
+const fmtSigned = (n, d = 2) => n == null ? '—' : (n >= 0 ? '+' : '−') + fmtUsd(Math.abs(n), d).replace('−', '');
+const fmtPct = (n, d = 1) => n == null || isNaN(n) ? '—' : `${n >= 0 ? '+' : '−'}${Math.abs(n).toFixed(d)}%`;
+const fmtPrice = (n) => !n ? '—' : n >= 1 ? '$' + n.toFixed(4) : '$' + n.toPrecision(4);
+const ago = (t) => {
+  if (!t) return '—';
+  const s = Math.max(0, (Date.now() - new Date(t).getTime()) / 1000);
+  if (s < 60) return `${Math.round(s)}s`;
+  if (s < 3600) return `${Math.round(s / 60)}m`;
+  if (s < 86400) return `${(s / 3600).toFixed(1)}h`;
+  return `${(s / 86400).toFixed(1)}d`;
+};
+const cls = (n) => (n > 0 ? 'up' : n < 0 ? 'down' : '');
+
+async function api(path, opts = {}) {
+  const res = await fetch(path, {
+    ...opts,
+    headers: { 'Content-Type': 'application/json', 'x-cockpit': '1', ...(opts.headers || {}) },
+  });
+  const json = await res.json().catch(() => ({}));
+  if (!res.ok) throw new Error(json.error || `HTTP ${res.status}`);
+  return json;
+}
+let toastTimer;
+function toast(msg, err = false) {
+  const t = $('toast');
+  t.textContent = msg; t.className = 'toast' + (err ? ' err' : ''); t.hidden = false;
+  clearTimeout(toastTimer); toastTimer = setTimeout(() => (t.hidden = true), 3200);
+}
+
+const state = { overview: null, signals: [], positions: [], wallets: [], selectedSignal: null, equity: [], perf: [] };
+
+/* ───────── HUD + wallet + KPIs ───────── */
+function renderOverview(o) {
+  state.overview = o;
+  const s = o.settings;
+  const pm = $('pillMode');
+  pm.className = 'pill ' + (s.paperTrading ? 'paper' : 'live');
+  pm.textContent = s.paperTrading ? 'Paper' : '● Live';
+  const pa = $('pillAuto');
+  pa.className = 'pill ' + (s.autoTradeMode ? 'auto' : '');
+  pa.textContent = s.autoTradeMode ? 'Autopilot' : 'Approval';
+  const cb = o.circuitBreaker;
+  const halted = cb.isTripped || cb.recentStopLosses >= cb.maxConsecutiveStopLoss;
+  $('pillCb').className = 'pill ' + (halted ? 'halt' : 'ok');
+  $('pillCb').textContent = halted ? 'Buys halted' : `Breaker ${cb.recentStopLosses}/${cb.maxConsecutiveStopLoss}`;
+  $('btnKill').textContent = cb.isTripped ? 'Resume buys' : 'Halt buys';
+
+  // Masthead reads like a headline of the bot's current state
+  const nOpen = o.stats.openCount, nWhales = o.whales.active || 0;
+  const plural = (n, w) => `${n} ${w}${n === 1 ? '' : 's'}`;
+  let head;
+  if (halted) head = `Buys are halted. <em>Open positions stay guarded.</em>`;
+  else if (nOpen > 0) head = `Holding ${plural(nOpen, 'position')}, <em>watching ${plural(nWhales, 'whale')}.</em>`;
+  else if (nWhales > 0) head = `Watching ${plural(nWhales, 'whale')}. <em>Waiting for a clean signal.</em>`;
+  else head = `Scouting for whales. <em>None has proven itself yet.</em>`;
+  $('mastHead').innerHTML = head;
+  $('mastKicker').textContent = `${s.paperTrading ? 'Paper trading' : 'Live trading'} · ${s.autoTradeMode ? 'Autopilot' : 'Approval mode'} · ${new Date().toLocaleDateString('en-GB', { weekday: 'long', day: 'numeric', month: 'long' })}`;
+  $('footInfo').textContent = `rpc ${o.rpc} · sol ${fmtUsd(o.wallet.solPrice)} · queue ${o.queue.waiting}/${o.queue.active}`;
+
+  const engines = [
+    ['scanner', 'SCAN', (s.autoScanIntervalSec || 20) * 3],
+    ['pipeline', 'PIPE', null],
+    ['monitor', 'MON', 60],
+    ['discovery', 'DISC', (s.autoDiscoveryIntervalMin || 60) * 120],
+  ];
+  $('engines').innerHTML = engines.map(([k, label, staleAfter]) => {
+    const e = o.engines[k];
+    let led = '';
+    if (e.lastRunAt) led = 'on';
+    if (staleAfter && e.lastRunAt && Date.now() - e.lastRunAt > staleAfter * 1000) led = 'stale';
+    if (e.lastError && e.errors > 0 && e.lastRunAt && e.lastResult == null) led = 'err';
+    const title = `${label}: runs ${e.runs}, errors ${e.errors}${e.lastError ? ' — ' + e.lastError : ''}`;
+    return `<span class="engine" title="${esc(title)}"><span class="led ${led}"></span>${label} <span class="muted">${e.lastRunAt ? ago(e.lastRunAt) : 'idle'}</span></span>`;
+  }).join('');
+
+  const up = o.uptimeSec;
+  $('uptime').textContent = `uptime ${Math.floor(up / 86400)}d ${String(Math.floor(up % 86400 / 3600)).padStart(2, '0')}h ${String(Math.floor(up % 3600 / 60)).padStart(2, '0')}m`;
+
+  const w = o.wallet;
+  $('wAddr').textContent = w.address || 'belum ada';
+  $('wSol').textContent = w.sol == null ? '—' : `${w.sol.toFixed(4)} SOL`;
+  $('wUsd').textContent = fmtUsd(w.usd);
+  $('wPrice').textContent = fmtUsd(w.solPrice);
+  $('wRpc').textContent = o.rpc.toUpperCase();
+  const hint = $('fundHint');
+  if (w.sol != null && w.sol < 0.05) {
+    hint.hidden = false;
+    hint.textContent = `Saldo rendah. Kirim SOL ke ${w.address} lalu aktifkan LIVE di Settings. Bot menyisakan ${s.solReserve} SOL untuk fee.`;
+  } else if (s.paperTrading) {
+    hint.hidden = false;
+    hint.textContent = 'Mode PAPER aktif — semua trade disimulasikan. Pantau hasilnya dulu, lalu aktifkan LIVE di Settings saat siap.';
+  } else hint.hidden = true;
+
+  const st = o.stats;
+  const whales = o.whales;
+  const spentPct = Math.min(100, (st.spent24h / (s.maxDailySpendUsd || 1)) * 100);
+  const openPct = Math.min(100, (st.openCount / (s.maxOpenPositions || 1)) * 100);
+  const tiles = [
+    ['Realised PnL', `<span class="${cls(st.realizedPnlUsd)}">${fmtSigned(st.realizedPnlUsd)}</span>`, `${st.closedCount} trade ditutup`],
+    ['Unrealised', `<span class="${cls(st.unrealizedPnlUsd)}">${fmtSigned(st.unrealizedPnlUsd)}</span>`, `nilai terbuka ${fmtUsd(st.openValueUsd)}`],
+    ['Win rate', `${st.closedCount ? st.winRate.toFixed(0) + '%' : '—'}`, `${st.wins}W · ${st.losses}L`, st.winRate],
+    ['Best / Worst', `<span style="font-size:.72em">${fmtPct(st.bestTradePct, 0)} <span class="muted">/</span> ${fmtPct(st.worstTradePct, 0)}</span>`, `avg hold ${st.avgHoldMin ? st.avgHoldMin.toFixed(0) + 'm' : '—'}`],
+    ['Open positions', `${st.openCount}<span class="muted">/${s.maxOpenPositions}</span>`, 'slot terpakai', openPct],
+    ['Spent 24h', fmtUsd(st.spent24h, 0), `cap ${fmtUsd(s.maxDailySpendUsd, 0)}`, spentPct],
+    ['Signals 24h', st.signals24h, `threshold ≥ ${s.scoringThreshold}`],
+    ['Whales active', whales.active || 0, `${whales.qualified || 0} qualified · ${whales.candidate || 0} pending · ${whales.rejected || 0} rejected`],
+  ];
+  $('kpis').innerHTML = tiles.map(([l, v, sub, m]) => `
+    <div class="kpi"><div class="lbl">${l}</div><div class="val">${v}</div><div class="sub">${sub}</div>
+    ${m != null ? `<div class="meter"><i style="width:${Math.max(2, m).toFixed(0)}%"></i></div>` : ''}</div>`).join('');
+
+  // Funnel (24h)
+  const f = o.funnel24h;
+  const total = Object.values(f).reduce((a, c) => a + c, 0);
+  const steps = [
+    ['Detected', total],
+    ['Rejected', (f.scored || 0)],
+    ['Passed', (f.pending_approval || 0) + (f.approved || 0) + (f.executing_buy || 0) + (f.bought || 0) + (f.timeout_expired || 0) + (f.skipped || 0) + (f.failed || 0)],
+    ['Bought', f.bought || 0],
+    ['Skip/stale', (f.skipped || 0) + (f.timeout_expired || 0)],
+    ['Failed/blocked', f.failed || 0],
+  ];
+  const max = Math.max(1, total);
+  $('funnel').innerHTML = steps.map(([l, n]) => `
+    <div class="funnel-row"><span class="t2">${l}</span><div class="bar"><i style="width:${(n / max * 100).toFixed(1)}%"></i></div><span class="mono" style="text-align:right">${n}</span></div>`).join('');
+  const q = o.queue;
+  $('queueInfo').textContent = `queue · waiting ${q.waiting} · active ${q.active} · failed ${q.failed}`;
+
+  // Exit reasons
+  const ex = Object.entries(st.exitReasons).sort((a, b) => b[1] - a[1]);
+  const exMax = Math.max(1, ...ex.map((e) => e[1]));
+  $('exits').innerHTML = ex.length ? ex.map(([r, n]) => `
+    <div class="funnel-row"><span class="t2 mono" style="font-size:11px">${esc(r)}</span><div class="bar"><i style="width:${(n / exMax * 100).toFixed(1)}%"></i></div><span class="mono" style="text-align:right">${n}</span></div>`).join('')
+    : '<div class="empty">Belum ada posisi yang ditutup.</div>';
+  $('thresholdLbl').textContent = `┆ threshold ${s.scoringThreshold}`;
+}
+
+/* ───────── Positions ───────── */
+function gauge(p, s) {
+  const lo = -s.stopLossPercent, hi = Math.max(s.takeProfitPercent, p.nextTpThreshold, p.highestPnlPercent);
+  const x = (v) => ((Math.min(hi, Math.max(lo, v)) - lo) / (hi - lo)) * 100;
+  const z = x(0), cur = x(p.pnlPercent);
+  const left = Math.min(z, cur), width = Math.abs(cur - z);
+  const color = p.pnlPercent >= 0 ? 'var(--good)' : 'var(--bad)';
+  return `<div class="gauge" title="SL ${lo}% · TP ${p.nextTpThreshold}% · peak ${fmtPct(p.highestPnlPercent)}">
+    <div class="fill" style="left:${left}%;width:${Math.max(1, width)}%;background:${color}"></div>
+    <div class="zero" style="left:${z}%"></div><div class="peak" style="left:${x(p.highestPnlPercent)}%"></div></div>`;
+}
+function renderPositions() {
+  const s = state.overview?.settings;
+  if (!s) return;
+  const open = state.positions.filter((p) => p.status !== 'closed');
+  $('posTag').textContent = `${open.length} aktif · SL −${s.stopLossPercent}% · TP +${s.takeProfitPercent}%${s.autoTradeMode && s.trailingStopPercent ? ` → trailing ${s.trailingStopPercent}%` : ''}`;
+  $('gaugeLegend').innerHTML = 'gauge: SL ◂ 0 ▸ TP · <span style="color:var(--violet)">▍</span> peak';
+  if (!open.length) { $('positions').innerHTML = '<div class="empty">Tidak ada posisi terbuka. Bot menunggu sinyal whale yang lolos safety check.</div>'; return; }
+  $('positions').innerHTML = `<table><thead><tr>
+    <th>Token</th><th>Mode</th><th class="num">Cost</th><th class="num">Entry</th><th class="num">Now</th><th class="num">PnL</th><th>SL ◂ ▸ TP</th>
+    <th class="num">Peak</th><th>Exit plan</th><th>Whale</th><th class="num">Age</th><th></th></tr></thead><tbody>
+    ${open.map((p) => {
+      const pnlUsd = p.entryAmount * p.currentPrice - (p.costUsd || p.entryAmount * p.entryPrice);
+      return `<tr>
+      <td><a href="https://dexscreener.com/solana/${esc(p.tokenAddress)}" target="_blank" rel="noopener"><b>${esc(p.tokenSymbol)}</b></a></td>
+      <td>${p.isPaper ? '<span class="badge warn">PAPER</span>' : '<span class="badge bad">LIVE</span>'}${p.status === 'closing' ? ' <span class="badge neon">SELLING…</span>' : ''}</td>
+      <td class="num">${fmtUsd(p.costUsd)}</td>
+      <td class="num">${fmtPrice(p.entryPrice)}</td>
+      <td class="num">${fmtPrice(p.currentPrice)}</td>
+      <td class="num ${cls(p.pnlPercent)}"><b>${fmtPct(p.pnlPercent)}</b><br><span style="font-size:11px">${fmtSigned(pnlUsd)}</span></td>
+      <td>${gauge(p, s)}</td>
+      <td class="num">${fmtPct(p.highestPnlPercent, 0)}</td>
+      <td>${p.trailingActive ? `<span class="badge good">TRAILING ${s.trailingStopPercent}%</span>` : `<span class="badge">TP @ +${p.nextTpThreshold}%</span>`}</td>
+      <td class="mono t2" title="${esc(p.whaleWallet)}">${short(p.whaleWallet)}</td>
+      <td class="num">${ago(p.openedAt)}</td>
+      <td><button class="sm danger" data-close="${esc(p.id)}" ${p.status !== 'open' ? 'disabled' : ''}>Sell</button></td></tr>`;
+    }).join('')}</tbody></table>`;
+}
+
+/* ───────── Signals + inspector ───────── */
+function ring(score, passed) {
+  const r = 17, c = 2 * Math.PI * r, v = Math.max(0, Math.min(100, score || 0));
+  const col = passed ? 'var(--good)' : v >= 50 ? 'var(--warn)' : 'var(--bad)';
+  return `<svg class="ring" viewBox="0 0 42 42"><circle cx="21" cy="21" r="${r}" fill="none" stroke="var(--surface-3)" stroke-width="4"/>
+    <circle cx="21" cy="21" r="${r}" fill="none" stroke="${col}" stroke-width="4" stroke-linecap="round"
+      stroke-dasharray="${(v / 100) * c} ${c}" transform="rotate(-90 21 21)"/>
+    <text x="21" y="25" text-anchor="middle" font-family="Geist Mono" font-size="11" font-weight="700" fill="var(--text)">${score == null ? '…' : Math.round(v)}</text></svg>`;
+}
+const STATUS_BADGE = {
+  bought: ['BOUGHT', 'good'], pending_approval: ['APPROVAL', 'neon'], approved: ['APPROVED', 'neon'], executing_buy: ['BUYING', 'neon'],
+  scored: ['REJECTED', 'bad'], failed: ['BLOCKED', 'bad'], skipped: ['SKIPPED', 'warn'], timeout_expired: ['TIMEOUT', 'warn'],
+  detected: ['SCANNING', ''], aggregated: ['SCORING', ''],
+};
+function renderFeed() {
+  if (!state.signals.length) { $('feed').innerHTML = '<div class="empty">Belum ada sinyal. Scanner memantau whale aktif tiap beberapa detik.</div>'; return; }
+  $('feed').innerHTML = state.signals.map((sg) => {
+    const [label, c] = STATUS_BADGE[sg.status] || [sg.status.toUpperCase(), ''];
+    const passed = sg.score && !sg.score.isHardFail && ['pending_approval', 'approved', 'executing_buy', 'bought', 'timeout_expired', 'skipped', 'failed'].includes(sg.status);
+    return `<div class="sig ${state.selectedSignal === sg.id ? 'sel' : ''}" data-sig="${esc(sg.id)}">
+      ${ring(sg.score?.totalScore, passed)}
+      <div style="min-width:0"><div><span class="sym">${esc(sg.tokenSymbol || short(sg.tokenAddress))}</span>
+        <span class="muted" style="font-size:11px"> ${esc((sg.tokenName || '').slice(0, 28))}</span></div>
+        <div class="meta">🐋 ${short(sg.wallet)} · ${fmtUsd(sg.amountUsd, 0)} · ${ago(sg.createdAt)} ago</div></div>
+      <span class="badge ${c}">${label}</span></div>`;
+  }).join('');
+}
+
+function check(state_, title, value) {
+  const ic = state_ === 'pass' ? '✓' : state_ === 'fail' ? '✗' : '?';
+  return `<div class="check ${state_}"><span class="ic">${ic}</span><div><div>${title}</div><div class="v">${value}</div></div></div>`;
+}
+function renderInspector() {
+  const sg = state.signals.find((x) => x.id === state.selectedSignal);
+  if (!sg) return;
+  const m = sg.rawMetrics || {};
+  const sc = sg.score;
+  const s = state.overview?.settings || {};
+  $('inspTag').textContent = `${sg.tokenSymbol || ''} · ${short(sg.tokenAddress)}`;
+  $('inspActions').innerHTML = sg.status === 'pending_approval'
+    ? `<button class="sm primary" data-approve="${esc(sg.id)}">✓ Approve buy</button><button class="sm" data-skip="${esc(sg.id)}">✗ Skip</button>` : '';
+  if (!sc) { $('inspector').innerHTML = '<div class="empty">Sedang mengumpulkan data token…</div>'; $('inspector').className = ''; return; }
+
+  const yes = (b) => (b ? 'fail' : 'pass');
+  const src = m.dataSources || {};
+  const checks = [
+    check(m.isHoneypot ? 'fail' : 'pass', 'Honeypot / exit block', m.isHoneypot ? esc((m.honeypotReasons || []).join('; ') || 'detected') : 'clean'),
+    check(m.sellRouteOk === true ? 'pass' : m.sellRouteOk === false ? 'fail' : 'unk', 'Sell route (Jupiter sim)',
+      m.sellRouteOk == null ? 'tidak bisa dicek' : `round-trip ${m.roundTripLossPct != null ? '−' + Number(m.roundTripLossPct).toFixed(1) + '%' : '—'} (max ${s.maxRoundTripLossPct}%)`),
+    check(m.buyPriceImpactPct == null ? 'unk' : m.buyPriceImpactPct > s.maxPriceImpactPct ? 'fail' : 'pass', 'Price impact (ukuran kita)',
+      m.buyPriceImpactPct == null ? '—' : `${Number(m.buyPriceImpactPct).toFixed(2)}% (max ${s.maxPriceImpactPct}%)`),
+    check(yes(m.hasMintFunction), 'Mint authority', m.hasMintFunction ? 'aktif — supply bisa dicetak' : 'revoked'),
+    check(yes(m.hasFreezeAuthority), 'Freeze authority', m.hasFreezeAuthority ? 'aktif — wallet bisa dibekukan' : 'revoked'),
+    check(m.isLiquidityLocked ? 'pass' : 'fail', 'LP locked / burned', `${m.lockedPercentage ?? 0}% · liq ${fmtUsd(m.liquidityUsd, 0)}`),
+    check(m.top10HoldersPercent <= 30 ? 'pass' : m.top10HoldersPercent <= 50 ? 'unk' : 'fail', 'Top-10 holder', `${Number(m.top10HoldersPercent || 0).toFixed(1)}% supply`),
+    check(m.contractVerified ? 'pass' : 'fail', 'Contract data', m.contractVerified ? 'terverifikasi' : 'tidak bisa diambil'),
+    check(m.rugged ? 'fail' : 'pass', 'Rug status', m.rugged ? 'RUGGED' : `RugCheck risk ${m.rugcheckScore ?? '—'}/100`),
+    check((m.insidersDetected || 0) > 0 ? 'unk' : 'pass', 'Insider networks', String(m.insidersDetected || 0)),
+    check(m.tokenAgeHours < 1 ? 'unk' : 'pass', 'Umur token', m.tokenAgeHours ? (m.tokenAgeHours < 1 ? `${Math.round(m.tokenAgeHours * 60)} menit` : `${Number(m.tokenAgeHours).toFixed(1)} jam`) : '—'),
+    check((m.holderCount || 0) >= 100 ? 'pass' : 'unk', 'Holders', (m.holderCount || 0).toLocaleString()),
+  ].join('');
+
+  const fac = sc.breakdown || {};
+  const factorRows = [['liquidity', 'Liquidity'], ['holderConcentration', 'Top-10 holders'], ['contractSafety', 'Contract safety'], ['volumeMcRatio', 'Volume / MC'], ['tokenAgeHolders', 'Age & holders']]
+    .map(([k, l]) => {
+      const f = fac[k] || {};
+      return `<div class="factor"><span class="t2">${l} <span class="muted mono" style="font-size:10px">×${Math.round((f.weight || 0) * 100)}%</span></span>
+        <div class="bar"><i style="width:${f.score || 0}%"></i></div><span class="mono" style="text-align:right">${f.score ?? 0}</span>
+        <div class="note">${esc(f.note)}</div></div>`;
+    }).join('');
+
+  const pc = m.priceChange || {};
+  const decision = sg.decision ? `<div class="mono t2" style="font-size:11px;margin-bottom:10px">DECISION › ${esc(sg.decision)}</div>` : '';
+  const risks = (m.riskFlags || []).length ? `<div style="margin-top:10px">${m.riskFlags.map((r) => `<span class="badge warn" style="margin:2px">${esc(r)}</span>`).join('')}</div>` : '';
+  $('inspector').className = '';
+  $('inspector').innerHTML = `
+    ${sc.isHardFail ? `<div class="hardfail">⛔ HARD FAIL — ${(sc.hardFailReasons || []).map(esc).join(' · ')}</div>` : ''}
+    ${decision}
+    <div style="display:flex;gap:18px;flex-wrap:wrap;align-items:center;margin-bottom:12px">
+      <div class="score-big">${sc.totalScore}<span class="muted serif" style="font-size:22px;letter-spacing:0"> /100</span></div>
+      <div class="mono t2" style="font-size:12px">MC ${fmtUsd(m.marketCap, 0)} · Vol24h ${fmtUsd(m.volume24h, 0)} · Price ${fmtPrice(m.priceUsd)}<br>
+        Δ5m <span class="${cls(pc.m5)}">${fmtPct(pc.m5)}</span> · Δ1h <span class="${cls(pc.h1)}">${fmtPct(pc.h1)}</span> · Δ24h <span class="${cls(pc.h24)}">${fmtPct(pc.h24)}</span>
+        · 1h tx ${m.txns1h?.buys ?? '—'}B/${m.txns1h?.sells ?? '—'}S</div>
+      <div style="margin-left:auto;display:flex;gap:8px;flex-wrap:wrap">
+        <a href="https://dexscreener.com/solana/${esc(sg.tokenAddress)}" target="_blank" rel="noopener">DexScreener ↗</a>
+        <a href="https://rugcheck.xyz/tokens/${esc(sg.tokenAddress)}" target="_blank" rel="noopener">RugCheck ↗</a>
+        <a href="https://solscan.io/account/${esc(sg.wallet)}" target="_blank" rel="noopener">Whale ↗</a>
+      </div>
+    </div>
+    ${factorRows}
+    <h2 style="margin-top:18px;font-size:17px">Safety checks <span class="tag">semua harus lolos</span></h2>
+    <div class="checks">${checks}</div>
+    ${risks}
+    <div class="mono muted" style="font-size:10px;margin-top:10px">sources: ${['dexscreener', 'goplus', 'rugcheck', 'jupiter'].map((k) => `${k} ${src[k] ? '●' : '○'}`).join(' · ')}</div>`;
+}
+
+/* ───────── Whales ───────── */
+function renderWhales() {
+  const f = $('whaleFilter').value;
+  const list = state.wallets.filter((w) => f === 'all' || (f === 'active' ? w.isActive : w.profileStatus === f));
+  $('whaleTag').textContent = `${state.wallets.filter((w) => w.isActive).length} dipantau · ${state.wallets.length} total`;
+  if (!list.length) { $('whales').innerHTML = '<div class="empty">Kosong. Discovery berjalan otomatis — klik ⚡ untuk memulai sekarang.</div>'; return; }
+  $('whales').innerHTML = `<table><thead><tr><th>Wallet</th><th>Label</th><th>Status</th><th class="num">Score</th><th class="num">Win rate</th>
+    <th class="num">Closed</th><th class="num">PnL (SOL)</th><th class="num">Avg hold</th><th class="num">Signals</th><th class="num">Scanned</th><th></th></tr></thead><tbody>
+    ${list.slice(0, 150).map((w) => {
+      const st = w.profileStatus === 'qualified' ? 'good' : w.profileStatus === 'rejected' ? 'bad' : 'warn';
+      return `<tr>
+        <td class="mono"><a href="https://solscan.io/account/${esc(w.address)}" target="_blank" rel="noopener">${short(w.address)}</a></td>
+        <td title="${esc(w.discoveredVia)}">${esc((w.label || '').slice(0, 34))}</td>
+        <td><span class="badge ${st}" title="${esc(w.profileReason)}">${esc(w.profileStatus.toUpperCase())}</span> ${w.isActive ? '<span class="badge neon">ON</span>' : ''}</td>
+        <td class="num">${w.whaleScore ? Math.round(w.whaleScore) : '—'}</td>
+        <td class="num">${w.closedTrades ? (w.winRate || 0).toFixed(0) + '%' : '—'}</td>
+        <td class="num">${w.wins || 0}W/${w.losses || 0}L</td>
+        <td class="num ${cls(w.realizedPnlSol)}">${w.closedTrades ? (w.realizedPnlSol >= 0 ? '+' : '−') + Math.abs(w.realizedPnlSol).toFixed(2) : '—'}</td>
+        <td class="num">${w.avgHoldMinutes ? (w.avgHoldMinutes < 120 ? w.avgHoldMinutes.toFixed(0) + 'm' : (w.avgHoldMinutes / 60).toFixed(1) + 'h') : '—'}</td>
+        <td class="num">${w.signalsTriggered || 0}</td>
+        <td class="num">${ago(w.lastScannedAt)}</td>
+        <td><div class="row-actions">
+          <button class="sm" data-profile="${esc(w.id)}" title="Analisa ulang riwayat trade">⟳</button>
+          <button class="sm" data-toggle="${esc(w.id)}">${w.isActive ? 'Pause' : 'On'}</button>
+          <button class="sm danger" data-del="${esc(w.id)}">✕</button></div></td></tr>`;
+    }).join('')}</tbody></table>`;
+}
+
+/* ───────── Trades + audit ───────── */
+function renderTrades(trades) {
+  if (!trades.length) { $('trades').innerHTML = '<div class="empty">Belum ada trade.</div>'; return; }
+  $('trades').innerHTML = `<table><thead><tr><th>Time</th><th>Side</th><th>Token</th><th class="num">USD</th><th class="num">Price</th><th>Tx</th></tr></thead><tbody>
+    ${trades.map((t) => `<tr><td class="mono t2">${new Date(t.createdAt).toLocaleTimeString('en-GB')}</td>
+      <td><span class="badge ${t.side === 'BUY' ? 'neon' : 'warn'}">${t.side}</span></td>
+      <td class="mono">${short(t.tokenAddress)}</td><td class="num">${fmtUsd(t.totalUsd)}</td><td class="num">${fmtPrice(t.price)}</td>
+      <td class="mono">${t.isPaper ? '<span class="muted">paper</span>' : `<a href="https://solscan.io/tx/${esc(t.txHash)}" target="_blank" rel="noopener">${short(t.txHash)}</a>`}</td></tr>`).join('')}
+  </tbody></table>`;
+}
+function renderAudit(logs) {
+  const tone = (a) => /FAIL|STOP_LOSS|BLOCK|REJECT|DEMOT|BREAKER|EXIT/.test(a) ? 'bad' : /FILLED|QUALIFIED|PASSED|AUTO_BUY_DECISION/.test(a) ? 'good' : /SKIP|TIMEOUT|TRAILING/.test(a) ? 'warn' : '';
+  const term = $('term');
+  const atBottom = term.scrollTop < 10;
+  term.innerHTML = logs.map((l) => `<div class="ln"><span class="ts">${new Date(l.createdAt).toLocaleTimeString('en-GB')}</span>
+    <span class="act ${tone(l.action)}">${esc(l.action)}</span><span>${esc(l.reason)}</span></div>`).join('') || '<div class="muted">Menunggu aktivitas…</div>';
+  if (atBottom) term.scrollTop = 0;
+  const items = logs.slice(0, 16).map((l) => `<span class="${tone(l.action)}">${new Date(l.createdAt).toLocaleTimeString('en-GB', { hour: '2-digit', minute: '2-digit' })} · ${esc(l.action.replace(/_/g, ' ').toLowerCase())} — ${esc((l.reason || '').slice(0, 70))}</span>`).join('');
+  $('ticker').innerHTML = items ? items + items : '<span>Menunggu aktivitas pertama…</span>';
+}
+
+/* ───────── Charts (canvas, hover tooltips) ───────── */
+function setupCanvas(box) {
+  const c = box.querySelector('canvas');
+  const dpr = window.devicePixelRatio || 1;
+  const w = box.clientWidth, h = box.clientHeight;
+  c.width = w * dpr; c.height = h * dpr;
+  const ctx = c.getContext('2d');
+  ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+  ctx.clearRect(0, 0, w, h);
+  return { ctx, w, h, c };
+}
+function tipEl(box) {
+  let t = box.querySelector('.tip');
+  if (!t) { t = document.createElement('div'); t.className = 'tip'; t.hidden = true; box.appendChild(t); }
+  return t;
+}
+const css = (v) => getComputedStyle(document.documentElement).getPropertyValue(v).trim();
+function niceTicks(min, max, n = 4) {
+  const span = max - min || 1;
+  const step = Math.pow(10, Math.floor(Math.log10(span / n)));
+  const err = span / n / step;
+  const s = step * (err >= 7.5 ? 10 : err >= 3.5 ? 5 : err >= 1.5 ? 2 : 1);
+  const out = [];
+  for (let v = Math.floor(min / s) * s; v <= max + 1e-9; v += s) out.push(+v.toFixed(10));
+  return out;
+}
+
+function drawEquity() {
+  const box = $('equityChart');
+  const { ctx, w, h, c } = setupCanvas(box);
+  const data = state.equity;
+  const tip = tipEl(box);
+  if (!data.length) {
+    ctx.fillStyle = css('--muted'); ctx.font = '12px "Geist Mono", monospace'; ctx.textAlign = 'center';
+    ctx.fillText('Equity curve muncul setelah trade pertama ditutup', w / 2, h / 2);
+    c.onmousemove = null; c.onmouseleave = null; tip.hidden = true; return;
+  }
+  const pts = [{ cum: 0 }, ...data];
+  const pad = { l: 58, r: 14, t: 12, b: 22 };
+  const vals = pts.map((p) => p.cum);
+  const ticks = niceTicks(Math.min(0, ...vals), Math.max(0, ...vals));
+  const lo = ticks[0], hi = ticks[ticks.length - 1] === lo ? lo + 1 : ticks[ticks.length - 1];
+  const X = (i) => pad.l + (i / Math.max(1, pts.length - 1)) * (w - pad.l - pad.r);
+  const Y = (v) => pad.t + (1 - (v - lo) / (hi - lo)) * (h - pad.t - pad.b);
+
+  const paint = (hover) => {
+    ctx.clearRect(0, 0, w, h);
+    ctx.font = '10px "Geist Mono", monospace'; ctx.textAlign = 'right'; ctx.textBaseline = 'middle';
+    for (const t of ticks) {
+      ctx.strokeStyle = t === 0 ? css('--line-strong') : css('--line'); ctx.lineWidth = 1;
+      ctx.beginPath(); ctx.moveTo(pad.l, Y(t)); ctx.lineTo(w - pad.r, Y(t)); ctx.stroke();
+      ctx.fillStyle = css('--muted'); ctx.fillText(fmtUsd(t, Math.abs(hi - lo) < 10 ? 2 : 0), pad.l - 6, Y(t));
+    }
+    const grad = ctx.createLinearGradient(0, pad.t, 0, h - pad.b);
+    grad.addColorStop(0, css('--series-fill')); grad.addColorStop(1, 'rgba(0,0,0,0)');
+    ctx.beginPath(); ctx.moveTo(X(0), Y(0));
+    pts.forEach((p, i) => ctx.lineTo(X(i), Y(p.cum)));
+    ctx.lineTo(X(pts.length - 1), Y(lo)); ctx.lineTo(X(0), Y(lo)); ctx.closePath(); ctx.fillStyle = grad; ctx.fill();
+    ctx.beginPath(); pts.forEach((p, i) => (i ? ctx.lineTo(X(i), Y(p.cum)) : ctx.moveTo(X(i), Y(p.cum))));
+    ctx.strokeStyle = css('--series-1'); ctx.lineWidth = 2; ctx.lineJoin = 'round'; ctx.stroke();
+    const last = pts[pts.length - 1];
+    ctx.fillStyle = css('--text'); ctx.textAlign = 'right'; ctx.font = '700 11px "Geist Mono", monospace';
+    ctx.fillText(fmtSigned(last.cum), w - pad.r, Math.max(pad.t + 6, Y(last.cum) - 10));
+    if (hover != null) {
+      const x = X(hover), y = Y(pts[hover].cum);
+      ctx.strokeStyle = css('--text-2'); ctx.lineWidth = 1; ctx.setLineDash([3, 3]);
+      ctx.beginPath(); ctx.moveTo(x, pad.t); ctx.lineTo(x, h - pad.b); ctx.stroke(); ctx.setLineDash([]);
+      ctx.beginPath(); ctx.arc(x, y, 5, 0, Math.PI * 2); ctx.fillStyle = css('--series-1'); ctx.fill();
+      ctx.lineWidth = 2; ctx.strokeStyle = css('--surface'); ctx.stroke();
+    }
+  };
+  paint(null);
+
+  c.onmousemove = (e) => {
+    const r = c.getBoundingClientRect();
+    const i = Math.round(((e.clientX - r.left - pad.l) / (w - pad.l - pad.r)) * (pts.length - 1));
+    if (i < 1 || i >= pts.length) { tip.hidden = true; paint(null); return; }
+    const p = pts[i];
+    paint(i);
+    tip.hidden = false;
+    tip.innerHTML = `#${i} ${esc(p.symbol || '')}<br>trade <span class="${cls(p.pnl)}">${fmtSigned(p.pnl)}</span><br>total ${fmtSigned(p.cum)}<br><span class="muted">${new Date(p.t).toLocaleString()}</span>`;
+    tip.style.left = Math.min(w - 160, X(i) + 10) + 'px'; tip.style.top = Math.max(0, Y(p.cum) - 40) + 'px';
+  };
+  c.onmouseleave = () => { tip.hidden = true; paint(null); };
+}
+
+function drawScatter() {
+  const box = $('scatterChart');
+  const { ctx, w, h, c } = setupCanvas(box);
+  const data = state.perf;
+  const tip = tipEl(box);
+  const thr = state.overview?.settings?.scoringThreshold ?? 80;
+  const pad = { l: 48, r: 14, t: 12, b: 26 };
+  const pn = data.map((d) => d.pnl);
+  const ticks = niceTicks(Math.min(-30, ...pn), Math.max(50, ...pn));
+  const lo = ticks[0], hi = ticks[ticks.length - 1];
+  const sx0 = 40;
+  const X = (s) => pad.l + ((s - sx0) / (100 - sx0)) * (w - pad.l - pad.r);
+  const Y = (v) => pad.t + (1 - (v - lo) / (hi - lo)) * (h - pad.t - pad.b);
+  ctx.font = '10px "Geist Mono", monospace'; ctx.textBaseline = 'middle';
+  for (const t of ticks) {
+    ctx.strokeStyle = t === 0 ? css('--line-strong') : css('--line'); ctx.lineWidth = 1;
+    ctx.beginPath(); ctx.moveTo(pad.l, Y(t)); ctx.lineTo(w - pad.r, Y(t)); ctx.stroke();
+    ctx.fillStyle = css('--muted'); ctx.textAlign = 'right'; ctx.fillText(`${t > 0 ? '+' : ''}${t}%`, pad.l - 6, Y(t));
+  }
+  ctx.textAlign = 'center';
+  for (let s = 40; s <= 100; s += 10) ctx.fillText(String(s), X(s), h - 10);
+  // threshold
+  ctx.strokeStyle = css('--text'); ctx.setLineDash([4, 4]); ctx.beginPath(); ctx.moveTo(X(thr), pad.t); ctx.lineTo(X(thr), h - pad.b); ctx.stroke(); ctx.setLineDash([]);
+  if (!data.length) {
+    ctx.fillStyle = css('--muted'); ctx.font = '12px "Geist Mono", monospace';
+    ctx.fillText('Belum ada trade tertutup dengan skor', w / 2, h / 2 - 20); c.onmousemove = null; tip.hidden = true; return;
+  }
+  const pos = data.map((d) => ({ ...d, x: X(Math.max(sx0, d.score)), y: Y(Math.max(lo, Math.min(hi, d.pnl))) }));
+  for (const p of pos) {
+    ctx.beginPath(); ctx.arc(p.x, p.y, 5, 0, Math.PI * 2);
+    ctx.fillStyle = p.pnl >= 0 ? css('--good') : css('--bad'); ctx.fill();
+    ctx.lineWidth = 2; ctx.strokeStyle = css('--surface'); ctx.stroke();
+  }
+  c.onmousemove = (e) => {
+    const r = c.getBoundingClientRect();
+    const mx = e.clientX - r.left, my = e.clientY - r.top;
+    let best = null, bd = 14 * 14;
+    for (const p of pos) { const d = (p.x - mx) ** 2 + (p.y - my) ** 2; if (d < bd) { bd = d; best = p; } }
+    if (!best) { tip.hidden = true; return; }
+    tip.hidden = false;
+    tip.innerHTML = `${esc(best.symbol)} · score ${best.score}<br>PnL <span class="${cls(best.pnl)}">${best.pnl >= 0 ? '▲' : '▼'} ${fmtPct(best.pnl)}</span><br><span class="muted">${esc(best.reason)}</span>`;
+    tip.style.left = Math.min(w - 150, best.x + 10) + 'px'; tip.style.top = Math.max(0, best.y - 40) + 'px';
+  };
+  c.onmouseleave = () => (tip.hidden = true);
+}
+
+/* ───────── Live readiness ───────── */
+const VERDICT_TEXT = {
+  collecting: 'Masih mengumpulkan data. <em>Tetap di paper mode.</em>',
+  not_ready: 'Belum layak live. <em>Perbaiki cek yang gagal.</em>',
+  ready_small: 'Siap uji live kecil. <em>Mulai dengan ukuran minimal.</em>',
+};
+const GROUP_LABEL = { data: 'Data', edge: 'Edge (setelah biaya)', risk: 'Risiko', ops: 'Operasional' };
+async function refreshReadiness() {
+  try {
+    const r = await api('/api/readiness');
+    $('readyVerdict').innerHTML = VERDICT_TEXT[r.verdict] || r.verdict;
+    $('readyCount').textContent = `${r.passed}/${r.total} cek otomatis lolos`;
+    $('readyBar').innerHTML = r.checks.filter((c) => c.status !== 'manual').map((c) => `<i class="${c.status}" title="${esc(c.label)}"></i>`).join('');
+    $('readyHaircut').textContent = `paper haircut −${r.haircutPct}% / trade`;
+    const ic = { pass: '✓', fail: '✗', pending: '…', manual: '?' };
+    const groups = ['data', 'edge', 'risk', 'ops'];
+    $('readyChecks').innerHTML = groups.map((g) => `<div class="ready-group">${GROUP_LABEL[g]}</div><div class="checks">${
+      r.checks.filter((c) => c.group === g).map((c) => `<div class="check ${c.status}" title="${esc(c.help)}"><span class="ic">${ic[c.status]}</span>
+        <div><div>${esc(c.label)}</div><div class="v">${esc(c.value)}</div><div class="tgt">target ${esc(c.target)}</div></div></div>`).join('')
+    }</div>`).join('');
+    if (r.verdict === 'ready_small') {
+      const f = r.recommendedFirstLive;
+      $('readyVerdict').innerHTML += `<div class="serif muted" style="font-size:17px;letter-spacing:0;margin-top:8px">Saran awal: $${f.tradeAmountUsd}/trade · max ${f.maxOpenPositions} posisi · cap $${f.maxDailySpendUsd}/hari · ${f.durationDays} hari</div>`;
+    }
+  } catch (e) { console.error(e); }
+}
+$('btnCopyReport').onclick = async () => {
+  try {
+    const res = await fetch('/api/readiness/export');
+    const text = JSON.stringify(await res.json(), null, 2);
+    await navigator.clipboard.writeText(text);
+    toast(`Report disalin (${Math.round(text.length / 1024)} KB) — tempel ke AI bersama prompt-nya`);
+  } catch (e) { toast('Gagal menyalin — pakai Download report', true); }
+};
+
+/* ───────── Settings drawer ───────── */
+const SETTINGS_SECTIONS = [
+  ['MODE', [
+    ['autoTradeMode', 'Autopilot (auto buy & sell)', 'bool', 'Off = setiap buy minta approval di Telegram'],
+    ['paperTrading', 'Paper trading (simulasi)', 'bool', 'Matikan untuk trading dengan dana asli'],
+    ['copySellEnabled', 'Copy-sell saat whale jual', 'bool', 'Jual otomatis kalau whale sumber sinyal keluar'],
+  ]],
+  ['POSITION SIZE', [
+    ['positionSizeMode', 'Mode ukuran', ['fixed_usd', 'percent_balance']],
+    ['tradeAmountUsd', 'Fixed USD / trade', 'num'],
+    ['positionSizePercent', '% saldo / trade', 'num'],
+    ['solReserve', 'SOL reserve (fee)', 'num'],
+    ['maxOpenPositions', 'Max posisi terbuka', 'int'],
+    ['maxDailySpendUsd', 'Max spend / 24 jam (USD)', 'num'],
+  ]],
+  ['EXITS', [
+    ['stopLossPercent', 'Stop-loss %', 'num'],
+    ['takeProfitPercent', 'Take-profit %', 'num'],
+    ['trailingStopPercent', 'Trailing stop % (0 = jual di TP)', 'num'],
+    ['takeProfitStep', 'Hold step % (approval mode)', 'num'],
+    ['approvalTimeoutSec', 'Approval timeout (detik)', 'int'],
+    ['buyTimeoutAction', 'Buy timeout action', ['skip', 'auto_buy']],
+  ]],
+  ['SAFETY & SCORING', [
+    ['scoringThreshold', 'Score threshold', 'num'],
+    ['minLiquidityUsd', 'Min liquidity USD', 'num'],
+    ['hardFailMinLiquidity', 'Hard-fail liquidity USD', 'num'],
+    ['maxPriceImpactPct', 'Max price impact %', 'num'],
+    ['maxRoundTripLossPct', 'Max round-trip loss %', 'num'],
+    ['slippageBps', 'Slippage (bps)', 'int'],
+    ['maxPriorityFee', 'Max priority fee (SOL)', 'num'],
+  ]],
+  ['WHALE CRITERIA', [
+    ['minWhaleWinRate', 'Min win rate %', 'num'],
+    ['minWhaleClosedTrades', 'Min closed trades', 'int'],
+    ['minWhaleBuyUsd', 'Min whale buy USD', 'num'],
+    ['maxSignalAgeSec', 'Max signal age (detik)', 'int'],
+  ]],
+  ['SCANNER', [
+    ['autoScanIntervalSec', 'Scan interval (detik)', 'int'],
+    ['autoDiscoveryEnabled', 'Auto discovery', 'bool'],
+    ['autoDiscoveryIntervalMin', 'Discovery interval (menit)', 'int'],
+  ]],
+  ['TELEGRAM', [
+    ['telegramBotToken', 'Bot token', 'text'],
+    ['telegramChatId', 'Chat ID', 'text'],
+  ]],
+];
+function openSettings() {
+  const s = state.overview?.settings;
+  if (!s) return;
+  const field = ([k, label, type, help]) => {
+    const v = s[k];
+    if (type === 'bool') return `<label class="switch" style="grid-column:1/-1"><input type="checkbox" data-k="${k}" data-t="bool" ${v ? 'checked' : ''}><span>${label}${help ? `<div class="help">${help}</div>` : ''}</span></label>`;
+    if (Array.isArray(type)) return `<div class="field"><label>${label}</label><select data-k="${k}" data-t="text">${type.map((o) => `<option ${o === v ? 'selected' : ''}>${o}</option>`).join('')}</select></div>`;
+    return `<div class="field"><label>${label}</label><input data-k="${k}" data-t="${type}" value="${esc(v ?? '')}"></div>`;
+  };
+  $('drawer').innerHTML = `
+    <div style="display:flex;align-items:center;gap:10px"><h2 style="margin:0;font:500 28px var(--display);letter-spacing:-.03em">Settings <em class="muted">&amp; limits</em></h2>
+      <span style="flex:1"></span><button id="sClose">Close</button></div>
+    ${SETTINGS_SECTIONS.map(([t, fs]) => `<h3>${t}</h3><div class="fgrid">${fs.map(field).join('')}</div>`).join('')}
+    <div id="liveConfirm" class="confirm-box" hidden>
+      <b>⚠ Mengaktifkan LIVE TRADING</b><br>Bot akan membeli & menjual token dengan SOL asli di wallet <span class="mono">${esc(short(state.overview.wallet.address))}</span> tanpa konfirmasi (autopilot).
+      Meme coin bisa turun ke nol. Ketik <b class="mono">LIVE</b> untuk konfirmasi:
+      <input id="liveWord" style="margin-top:8px" autocomplete="off"></div>
+    <div style="display:flex;gap:8px;margin-top:18px;flex-wrap:wrap">
+      <button class="primary" id="sSave">Save settings</button>
+      <button id="sTest">Test Telegram</button>
+    </div>`;
+  $('drawer').hidden = false; $('drawerBg').hidden = false;
+  const paperBox = $('drawer').querySelector('[data-k="paperTrading"]');
+  paperBox.addEventListener('change', () => ($('liveConfirm').hidden = paperBox.checked || !s.paperTrading));
+  $('sClose').onclick = closeSettings;
+  $('sTest').onclick = async () => { try { await saveSettings(true); await api('/api/settings/test-telegram', { method: 'POST' }); toast('Pesan test terkirim ke Telegram'); } catch (e) { toast(e.message, true); } };
+  $('sSave').onclick = () => saveSettings().then(() => { closeSettings(); toast('Settings tersimpan'); }).catch((e) => toast(e.message, true));
+}
+async function saveSettings(silent) {
+  const body = {};
+  for (const el of $('drawer').querySelectorAll('[data-k]')) {
+    const t = el.dataset.t, k = el.dataset.k;
+    body[k] = t === 'bool' ? el.checked : t === 'num' ? parseFloat(el.value) : t === 'int' ? parseInt(el.value, 10) : el.value;
+    if ((t === 'num' || t === 'int') && isNaN(body[k])) delete body[k];
+  }
+  if (state.overview.settings.paperTrading && body.paperTrading === false) {
+    if (($('liveWord')?.value || '').trim() !== 'LIVE') {
+      if (silent) body.paperTrading = true; else throw new Error('Ketik LIVE untuk mengaktifkan live trading');
+    }
+  }
+  await api('/api/settings', { method: 'POST', body: JSON.stringify(body) });
+  await refreshOverview();
+}
+function closeSettings() { $('drawer').hidden = true; $('drawerBg').hidden = true; }
+
+/* ───────── Data loops ───────── */
+async function refreshOverview() {
+  try { renderOverview(await api('/api/overview')); } catch (e) { console.error(e); }
+}
+async function refreshData() {
+  try {
+    const [signals, positions, wallets, trades, audit, equity, perf] = await Promise.all([
+      api('/api/signals'), api('/api/positions'), api('/api/wallets'), api('/api/trades'),
+      api('/api/audit?limit=120'), api('/api/equity'), api('/api/performance'),
+    ]);
+    state.signals = signals; state.positions = positions; state.wallets = wallets; state.equity = equity; state.perf = perf;
+    if (!state.selectedSignal && signals.length) state.selectedSignal = signals[0].id;
+    renderPositions(); renderFeed(); renderInspector(); renderWhales(); renderTrades(trades); renderAudit(audit);
+    drawEquity(); drawScatter();
+  } catch (e) { console.error(e); }
+}
+
+document.addEventListener('click', async (e) => {
+  const t = e.target.closest('[data-sig],[data-close],[data-approve],[data-skip],[data-profile],[data-toggle],[data-del]');
+  if (!t) return;
+  const d = t.dataset;
+  try {
+    if (d.sig) { state.selectedSignal = d.sig; renderFeed(); renderInspector(); return; }
+    if (d.close) {
+      if (t.dataset.armed !== '1') { t.dataset.armed = '1'; t.textContent = 'Confirm?'; setTimeout(() => { t.dataset.armed = ''; t.textContent = 'Sell'; }, 3000); return; }
+      t.disabled = true; const r = await api(`/api/positions/${d.close}/close`, { method: 'POST' });
+      toast(r.success ? `Sold · ${fmtPct(r.pnlPercent)}` : r.error, !r.success);
+    }
+    if (d.approve) { await api(`/api/signals/${d.approve}/approve`, { method: 'POST' }); toast('Buy approved'); }
+    if (d.skip) { await api(`/api/signals/${d.skip}/skip`, { method: 'POST' }); toast('Signal skipped'); }
+    if (d.profile) { t.disabled = true; t.textContent = '…'; const r = await api(`/api/wallets/${d.profile}/profile`, { method: 'POST' }); toast(`${r.profile.qualified ? '✓ Qualified' : '✗ ' + r.profile.reason}`); }
+    if (d.toggle) await api(`/api/wallets/${d.toggle}/toggle`, { method: 'POST' });
+    if (d.del) {
+      if (t.dataset.armed !== '1') { t.dataset.armed = '1'; t.textContent = 'Sure?'; setTimeout(() => { t.dataset.armed = ''; t.textContent = '✕'; }, 3000); return; }
+      await api(`/api/wallets/${d.del}`, { method: 'DELETE' });
+    }
+    refreshData(); refreshOverview();
+  } catch (err) { toast(err.message, true); }
+});
+
+$('btnSettings').onclick = openSettings;
+$('drawerBg').onclick = closeSettings;
+$('whaleFilter').onchange = renderWhales;
+$('btnCopy').onclick = async () => {
+  const a = state.overview?.wallet?.address; if (!a) return;
+  try { await navigator.clipboard.writeText(a); toast('Address copied'); } catch { toast(a); }
+};
+$('btnKill').onclick = async () => {
+  const tripped = state.overview?.circuitBreaker?.isTripped;
+  await api(`/api/circuit-breaker/${tripped ? 'reset' : 'trip'}`, { method: 'POST', body: '{}' });
+  toast(tripped ? 'Buys resumed' : 'All new buys halted'); refreshOverview();
+};
+$('btnDiscover').onclick = async () => { await api('/api/wallets/auto-discover', { method: 'POST' }); toast('Discovery dijalankan — hasil muncul dalam beberapa menit'); };
+$('btnScan').onclick = async () => { await api('/api/wallets/scan-now', { method: 'POST' }); toast('Scan dijalankan'); };
+$('btnSim').onclick = async () => { await api('/api/simulate-signal', { method: 'POST', body: '{}' }); toast('Sinyal simulasi dikirim (paper)'); setTimeout(refreshData, 1500); };
+$('btnAdd').onclick = async () => {
+  const address = $('newAddr').value.trim(); if (!address) return;
+  try {
+    await api('/api/wallets', { method: 'POST', body: JSON.stringify({ address, label: $('newLabel').value.trim() || undefined }) });
+    $('newAddr').value = ''; $('newLabel').value = ''; toast('Wallet ditambahkan — profiling berjalan'); refreshData();
+  } catch (e) { toast(e.message, true); }
+};
+
+setInterval(() => { $('clock').textContent = new Date().toLocaleTimeString('en-GB', { hour12: false }) + ' ' + Intl.DateTimeFormat().resolvedOptions().timeZone.split('/').pop(); }, 1000);
+window.addEventListener('resize', () => { drawEquity(); drawScatter(); });
+refreshOverview().then(refreshData);
+refreshReadiness();
+setInterval(refreshReadiness, 30000);
+setInterval(refreshOverview, 3000);
+setInterval(refreshData, 5000);
+</script>
+</body>
+</html>

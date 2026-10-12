@@ -1,35 +1,17 @@
+import type { BotSetting } from '@prisma/client';
 import { prisma } from '../db/prisma.js';
 import { env } from '../config/index.js';
 import { logger } from './logger.js';
 
-export interface BotSettingsData {
-  paperTrading: boolean;
-  chain: string;
-  tradeAmountUsd: number;
-  maxOpenPositions: number;
-  maxDailySpendUsd: number;
-  slippageBps: number;
-  maxPriorityFee: number;
-  stopLossPercent: number;
-  takeProfitPercent: number;
-  takeProfitStep: number;
-  approvalTimeoutSec: number;
-  buyTimeoutAction: string;
-  scoringThreshold: number;
-  minLiquidityUsd: number;
-  hardFailMinLiquidity: number;
-  autoScanIntervalSec: number;
-  autoDiscoveryEnabled: boolean;
-  autoDiscoveryIntervalMin: number;
-  mySolanaWallet?: string | null;
-  mySolanaPrivateKey?: string | null;
-  telegramBotToken?: string | null;
-  telegramChatId?: string | null;
-}
+export type BotSettingsData = Omit<BotSetting, 'id' | 'updatedAt'>;
+
+// Fields that must never be written through the generic settings API
+const PROTECTED_FIELDS = new Set(['id', 'updatedAt', 'mySolanaWallet', 'mySolanaPrivateKey']);
 
 export class SettingsService {
   private cachedSettings: BotSettingsData | null = null;
   private lastFetchTime = 0;
+  private listeners: Array<(s: BotSettingsData) => void> = [];
 
   async getSettings(): Promise<BotSettingsData> {
     const now = Date.now();
@@ -47,8 +29,6 @@ export class SettingsService {
           paperTrading: env.PAPER_TRADING,
           chain: env.CHAIN,
           tradeAmountUsd: env.TRADE_AMOUNT_USD,
-          maxOpenPositions: 5,
-          maxDailySpendUsd: 200,
           slippageBps: env.SLIPPAGE_BPS,
           maxPriorityFee: env.MAX_PRIORITY_FEE,
           stopLossPercent: env.STOP_LOSS_PERCENT,
@@ -59,61 +39,57 @@ export class SettingsService {
           scoringThreshold: env.SCORING_THRESHOLD,
           minLiquidityUsd: env.MIN_LIQUIDITY_USD,
           hardFailMinLiquidity: env.HARD_FAIL_MIN_LIQUIDITY_USD,
-          autoScanIntervalSec: 20,
-          autoDiscoveryEnabled: true,
-          autoDiscoveryIntervalMin: 60,
-          mySolanaWallet: '',
-          mySolanaPrivateKey: env.SOLANA_PRIVATE_KEY || '',
-          telegramBotToken: env.TELEGRAM_BOT_TOKEN || '',
+          telegramBotToken: env.TELEGRAM_BOT_TOKEN.startsWith('mock_') ? '' : env.TELEGRAM_BOT_TOKEN,
           telegramChatId: env.TELEGRAM_CHAT_ID || '',
         },
       });
       logger.info('Initialized default bot settings in database');
     }
 
-    this.cachedSettings = {
-      paperTrading: record.paperTrading,
-      chain: record.chain,
-      tradeAmountUsd: record.tradeAmountUsd,
-      maxOpenPositions: record.maxOpenPositions,
-      maxDailySpendUsd: record.maxDailySpendUsd,
-      slippageBps: record.slippageBps,
-      maxPriorityFee: record.maxPriorityFee,
-      stopLossPercent: record.stopLossPercent,
-      takeProfitPercent: record.takeProfitPercent,
-      takeProfitStep: record.takeProfitStep,
-      approvalTimeoutSec: record.approvalTimeoutSec,
-      buyTimeoutAction: record.buyTimeoutAction,
-      scoringThreshold: record.scoringThreshold,
-      minLiquidityUsd: record.minLiquidityUsd,
-      hardFailMinLiquidity: record.hardFailMinLiquidity,
-      autoScanIntervalSec: record.autoScanIntervalSec,
-      autoDiscoveryEnabled: record.autoDiscoveryEnabled,
-      autoDiscoveryIntervalMin: record.autoDiscoveryIntervalMin,
-      mySolanaWallet: record.mySolanaWallet,
-      mySolanaPrivateKey: record.mySolanaPrivateKey,
-      telegramBotToken: record.telegramBotToken,
-      telegramChatId: record.telegramChatId,
-    };
+    const { id: _id, updatedAt: _u, ...data } = record;
+    this.cachedSettings = data;
     this.lastFetchTime = now;
-
     return this.cachedSettings;
   }
 
   async updateSettings(updates: Partial<BotSettingsData>): Promise<BotSettingsData> {
-    const updated = await prisma.botSetting.upsert({
+    const clean: Record<string, any> = {};
+    for (const [k, v] of Object.entries(updates)) {
+      if (!PROTECTED_FIELDS.has(k) && v !== undefined) clean[k] = v;
+    }
+
+    await prisma.botSetting.upsert({
       where: { id: 'default' },
-      create: {
-        id: 'default',
-        ...updates,
-      },
-      update: updates,
+      create: { id: 'default', ...clean },
+      update: clean,
     });
 
     this.cachedSettings = null; // Invalidate cache
-    logger.info({ updates }, 'Bot settings updated successfully');
+    logger.info({ updates: Object.keys(clean) }, 'Bot settings updated successfully');
 
-    return this.getSettings();
+    const fresh = await this.getSettings();
+    for (const l of this.listeners) {
+      try {
+        l(fresh);
+      } catch (err: any) {
+        logger.error({ err: err?.message }, 'Settings listener failed');
+      }
+    }
+    return fresh;
+  }
+
+  onChange(listener: (s: BotSettingsData) => void) {
+    this.listeners.push(listener);
+  }
+
+  /** Settings safe to send to the browser (no secrets) */
+  async getPublicSettings() {
+    const { mySolanaPrivateKey, telegramBotToken, ...rest } = await this.getSettings();
+    return {
+      ...rest,
+      hasTradingKey: !!mySolanaPrivateKey || !!env.SOLANA_PRIVATE_KEY,
+      telegramBotToken: telegramBotToken ? `${telegramBotToken.slice(0, 6)}...${telegramBotToken.slice(-4)}` : '',
+    };
   }
 }
 
