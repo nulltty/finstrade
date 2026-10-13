@@ -364,7 +364,7 @@
     <div class="wallet">
       <div><div class="lbl">Address</div><div class="addr" id="wAddr">—</div></div>
       <div><div class="lbl">Balance</div><div class="big" id="wSol">—</div></div>
-      <div><div class="lbl">Value</div><div class="big t2" id="wUsd">—</div></div>
+      <div><div class="lbl">Value</div><div class="big t2" id="wUsd">—</div><div class="muted" style="font-size:12px" id="wIdr"></div></div>
       <div><div class="lbl">SOL / USD</div><div class="big t2" id="wPrice">—</div></div>
       <div><div class="lbl">RPC</div><div class="big t2" id="wRpc">—</div></div>
       <div class="fund-hint" id="fundHint" hidden></div>
@@ -472,6 +472,7 @@ const $ = (id) => document.getElementById(id);
 const esc = (s) => String(s ?? '').replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
 const short = (a) => a ? `${a.slice(0, 4)}…${a.slice(-4)}` : '—';
 const fmtUsd = (n, d = 2) => n == null || isNaN(n) ? '—' : (n < 0 ? '−$' : '$') + Math.abs(n).toLocaleString('en-US', { minimumFractionDigits: d, maximumFractionDigits: d });
+const fmtIdr = (n) => n == null || isNaN(n) ? '—' : 'Rp' + Math.round(n).toLocaleString('id-ID');
 const fmtSigned = (n, d = 2) => n == null ? '—' : (n >= 0 ? '+' : '−') + fmtUsd(Math.abs(n), d).replace('−', '');
 const fmtPct = (n, d = 1) => n == null || isNaN(n) ? '—' : `${n >= 0 ? '+' : '−'}${Math.abs(n).toFixed(d)}%`;
 const fmtPrice = (n) => !n ? '—' : n >= 1 ? '$' + n.toFixed(4) : '$' + n.toPrecision(4);
@@ -510,6 +511,7 @@ function renderOverview(o) {
   const pm = $('pillMode');
   pm.className = 'pill ' + (s.paperTrading ? 'paper' : 'live');
   pm.textContent = s.paperTrading ? 'Paper' : '● Live';
+  $('readiness').hidden = !s.paperTrading;
   const pa = $('pillAuto');
   pa.className = 'pill ' + (s.autoTradeMode ? 'auto' : '');
   pa.textContent = s.autoTradeMode ? 'Autopilot' : 'Approval';
@@ -554,6 +556,7 @@ function renderOverview(o) {
   $('wAddr').textContent = w.address || 'belum ada';
   $('wSol').textContent = w.sol == null ? '—' : `${w.sol.toFixed(4)} SOL`;
   $('wUsd').textContent = fmtUsd(w.usd);
+  $('wIdr').textContent = w.idr == null ? '' : `≈ ${fmtIdr(w.idr)}`;
   $('wPrice').textContent = fmtUsd(w.solPrice);
   $('wRpc').textContent = o.rpc.toUpperCase();
   const hint = $('fundHint');
@@ -624,7 +627,7 @@ function renderPositions() {
   const s = state.overview?.settings;
   if (!s) return;
   const open = state.positions.filter((p) => p.status !== 'closed');
-  $('posTag').textContent = `${open.length} aktif · SL −${s.stopLossPercent}% · TP +${s.takeProfitPercent}%${s.autoTradeMode && s.trailingStopPercent ? ` → trailing ${s.trailingStopPercent}%` : ''}`;
+  $('posTag').textContent = `${open.length} aktif · SL −${s.stopLossPercent}% · TP +${s.takeProfitPercent}%${s.autoTradeMode && s.trailingStopPercent ? ` · trailing armed @+${s.trailingArmPercent}% → ${s.trailingStopPercent}% dari peak` : ''}`;
   $('gaugeLegend').innerHTML = 'gauge: SL ◂ 0 ▸ TP · <span style="color:var(--violet)">▍</span> peak';
   if (!open.length) { $('positions').innerHTML = '<div class="empty">Tidak ada posisi terbuka. Bot menunggu sinyal whale yang lolos safety check.</div>'; return; }
   $('positions').innerHTML = `<table><thead><tr>
@@ -978,7 +981,8 @@ const SETTINGS_SECTIONS = [
   ['EXITS', [
     ['stopLossPercent', 'Stop-loss %', 'num'],
     ['takeProfitPercent', 'Take-profit %', 'num'],
-    ['trailingStopPercent', 'Trailing stop % (0 = jual di TP)', 'num'],
+    ['trailingArmPercent', 'Arm trailing di profit % (0 = tunggu TP penuh)', 'num'],
+    ['trailingStopPercent', 'Trailing stop % dari peak (setelah armed)', 'num'],
     ['takeProfitStep', 'Hold step % (approval mode)', 'num'],
     ['approvalTimeoutSec', 'Approval timeout (detik)', 'int'],
     ['buyTimeoutAction', 'Buy timeout action', ['skip', 'auto_buy']],

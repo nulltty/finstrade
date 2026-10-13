@@ -11,7 +11,7 @@ import { telegramBot } from '../bot/telegram.js';
 import { settingsService } from '../services/settings.js';
 import { systemStatus } from '../services/status.js';
 import { computeReadiness, buildReadinessReport } from '../services/readiness.js';
-import { getTradingKeypair, getSolBalance, getSolPriceUsd } from '../services/solana.js';
+import { getTradingKeypair, getSolBalance, getSolPriceUsd, getUsdToIdrRate } from '../services/solana.js';
 import { multiWalletScannerQueue, signalQueue, whaleDiscoveryQueue } from '../workers/queue.js';
 import { env, solanaRpcUrl } from '../config/index.js';
 import { logger } from '../services/logger.js';
@@ -26,11 +26,14 @@ async function walletSnapshot() {
   if (address && (Date.now() - balanceCache.at > 15000 || balanceCache.address !== address)) {
     balanceCache = { at: Date.now(), sol: await getSolBalance(address), address };
   }
-  const solPrice = await getSolPriceUsd();
+  const [solPrice, idrRate] = await Promise.all([getSolPriceUsd(), getUsdToIdrRate()]);
+  const usd = balanceCache.sol !== null ? balanceCache.sol * solPrice : null;
   return {
     address,
     sol: balanceCache.sol,
-    usd: balanceCache.sol !== null ? balanceCache.sol * solPrice : null,
+    usd,
+    idr: usd !== null ? usd * idrRate : null,
+    idrRate,
     solPrice,
   };
 }
@@ -69,13 +72,17 @@ export function createServer() {
   }));
 
   // ── Cockpit overview (single call the dashboard polls) ──────────────────
-  app.get('/api/overview', h(async (_req, res) => {
+  app.get('/api/overview', h(async (req, res) => {
     const since24h = new Date(Date.now() - 24 * 3600 * 1000);
+    const settingsPreview = await settingsService.getPublicSettings();
+    // Auto-hide paper history once running live, so win/loss stats reflect real trades only.
+    // ?includePaper=1 overrides this to inspect the full history including paper trades.
+    const modeFilter = req.query.includePaper === '1' ? {} : { isPaper: settingsPreview.paperTrading };
     const [settings, wallet, open, closed, signals24h, statusGroups, whaleGroups, activeWhales, spent24h, queueCounts] = await Promise.all([
-      settingsService.getPublicSettings(),
+      Promise.resolve(settingsPreview),
       walletSnapshot(),
-      prisma.position.findMany({ where: { status: { in: ['open', 'closing'] } } }),
-      prisma.position.findMany({ where: { status: 'closed' }, select: { pnlPercent: true, costUsd: true, proceedsUsd: true, entryAmount: true, entryPrice: true, exitPrice: true, openedAt: true, closedAt: true, exitReason: true } }),
+      prisma.position.findMany({ where: { status: { in: ['open', 'closing'] }, ...modeFilter } }),
+      prisma.position.findMany({ where: { status: 'closed', ...modeFilter }, select: { pnlPercent: true, costUsd: true, proceedsUsd: true, entryAmount: true, entryPrice: true, exitPrice: true, openedAt: true, closedAt: true, exitReason: true } }),
       prisma.signal.count({ where: { createdAt: { gte: since24h } } }),
       prisma.signal.groupBy({ by: ['status'], _count: { _all: true }, where: { createdAt: { gte: since24h } } }),
       prisma.watchedWallet.groupBy({ by: ['profileStatus'], _count: { _all: true } }),
@@ -130,8 +137,10 @@ export function createServer() {
     });
   }));
 
-  app.get('/api/equity', h(async (_req, res) => {
-    const closed = await prisma.position.findMany({ where: { status: 'closed' }, orderBy: { closedAt: 'asc' } });
+  app.get('/api/equity', h(async (req, res) => {
+    const settings = await settingsService.getPublicSettings();
+    const modeFilter = req.query.includePaper === '1' ? {} : { isPaper: settings.paperTrading };
+    const closed = await prisma.position.findMany({ where: { status: 'closed', ...modeFilter }, orderBy: { closedAt: 'asc' } });
     let cum = 0;
     res.json(
       closed.map((p) => {
@@ -143,9 +152,11 @@ export function createServer() {
   }));
 
   // Score vs actual outcome — for tuning the threshold (Batch 8)
-  app.get('/api/performance', h(async (_req, res) => {
+  app.get('/api/performance', h(async (req, res) => {
+    const settings = await settingsService.getPublicSettings();
+    const modeFilter = req.query.includePaper === '1' ? {} : { isPaper: settings.paperTrading };
     const closed = await prisma.position.findMany({
-      where: { status: 'closed', signalId: { not: null } },
+      where: { status: 'closed', signalId: { not: null }, ...modeFilter },
       include: { signal: { include: { score: true } } },
     });
     res.json(
@@ -252,8 +263,10 @@ export function createServer() {
     res.json(await prisma.position.findMany({ orderBy: { openedAt: 'desc' }, take: 60, include: { trades: true } }));
   }));
 
-  app.get('/api/trades', h(async (_req, res) => {
-    res.json(await prisma.trade.findMany({ orderBy: { createdAt: 'desc' }, take: 60 }));
+  app.get('/api/trades', h(async (req, res) => {
+    const settings = await settingsService.getPublicSettings();
+    const modeFilter = req.query.includePaper === '1' ? {} : { isPaper: settings.paperTrading };
+    res.json(await prisma.trade.findMany({ where: modeFilter, orderBy: { createdAt: 'desc' }, take: 60 }));
   }));
 
   app.get('/api/circuit-breaker', (_req, res) => res.json(circuitBreaker.getStatus()));

@@ -186,6 +186,25 @@ export async function getSolPriceUsd(): Promise<number> {
   return solPriceCache.value;
 }
 
+let idrRateCache = { value: 16000, at: 0 }; // sensible fallback if the FX API is unreachable
+
+export async function getUsdToIdrRate(): Promise<number> {
+  if (idrRateCache.at > 0 && Date.now() - idrRateCache.at < 6 * 3600 * 1000) return idrRateCache.value;
+
+  try {
+    const res = await fetch('https://open.er-api.com/v6/latest/USD', { signal: AbortSignal.timeout(5000) });
+    const json = (await res.json()) as any;
+    const rate = Number(json?.rates?.IDR);
+    if (rate > 0) {
+      idrRateCache = { value: rate, at: Date.now() };
+      return rate;
+    }
+  } catch (err: any) {
+    logger.warn({ err: err?.message }, 'USD/IDR rate lookup failed');
+  }
+  return idrRateCache.value;
+}
+
 // ─── Jupiter swaps ─────────────────────────────────────────────────────────
 
 function jupHeaders(): Record<string, string> {
@@ -257,14 +276,44 @@ export async function executeJupiterSwap(quote: JupiterQuote, keypair: Keypair, 
 
   const signature = await connection.sendRawTransaction(tx.serialize(), { skipPreflight: false, maxRetries: 3 });
   const blockhash = tx.message.recentBlockhash;
-  const confirmation = await connection.confirmTransaction(
-    { signature, blockhash, lastValidBlockHeight: lastValidBlockHeight ?? (await connection.getBlockHeight()) + 150 },
-    'confirmed'
-  );
-  if (confirmation.value.err) {
-    throw new Error(`Swap ${signature} failed on-chain: ${JSON.stringify(confirmation.value.err)}`);
+
+  try {
+    const confirmation = await connection.confirmTransaction(
+      { signature, blockhash, lastValidBlockHeight: lastValidBlockHeight ?? (await connection.getBlockHeight()) + 150 },
+      'confirmed'
+    );
+    if (confirmation.value.err) {
+      throw new Error(`Swap ${signature} failed on-chain: ${JSON.stringify(confirmation.value.err)}`);
+    }
+    return signature;
+  } catch (err: any) {
+    if (!/block height exceeded|expired/i.test(err?.message || '')) throw err;
+
+    // Local wait for confirmation timed out (blockhash expired) — the tx may have still
+    // landed. Poll the signature directly for longer before giving up, so a real fill is
+    // never mistaken for a failure and real money never goes untracked.
+    logger.warn({ signature }, 'Swap confirmation timed out (blockhash expired) — polling signature status directly');
+    const outcome = await pollSignatureOutcome(signature);
+    if (outcome === 'success') return signature;
+    if (outcome === 'failed') throw new Error(`Swap ${signature} failed on-chain after blockhash expiry`);
+    throw new Error(`AMBIGUOUS_SWAP ${signature}: status still unknown after blockhash expiry — wallet balance must be checked before retrying`);
   }
-  return signature;
+}
+
+async function pollSignatureOutcome(signature: string): Promise<'success' | 'failed' | 'unknown'> {
+  for (let i = 0; i < 15; i++) {
+    const res = await rpc<{ value: Array<{ confirmationStatus?: string; err: any } | null> }>(
+      'getSignatureStatuses',
+      [[signature], { searchTransactionHistory: true }]
+    );
+    const status = res?.value?.[0];
+    if (status) {
+      if (status.err) return 'failed';
+      if (status.confirmationStatus === 'confirmed' || status.confirmationStatus === 'finalized') return 'success';
+    }
+    await sleep(3000);
+  }
+  return 'unknown';
 }
 
 // ─── Transaction normalisation (shared by scanner, profiler, executor) ─────

@@ -188,6 +188,7 @@ model BotSetting {
 
   autoTradeMode         Boolean                @default(true) @map("auto_trade_mode")
   trailingStopPercent   Float                  @default(15.0) @map("trailing_stop_percent")
+  trailingArmPercent    Float                  @default(20.0) @map("trailing_arm_percent")
   copySellEnabled       Boolean                @default(true) @map("copy_sell_enabled")
   positionSizeMode      String                 @default("fixed_usd") @map("position_size_mode") // fixed_usd, percent_balance
   positionSizePercent   Float                  @default(5.0) @map("position_size_percent")

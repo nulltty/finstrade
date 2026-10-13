@@ -60,7 +60,16 @@ export class PositionMonitorService {
       return;
     }
 
-    // 2. TRAILING STOP: armed after take-profit in auto mode, locks in gains
+    // 2. TRAILING ARM: once profit passes trailingArmPercent, arm the trailing stop early —
+    // protects gains on a fast pump-then-dump that never reaches the full take-profit target.
+    if (!pos.trailingActive && settings.autoTradeMode && settings.trailingStopPercent > 0 && settings.trailingArmPercent > 0 && pnlPercent >= settings.trailingArmPercent) {
+      await prisma.position.update({ where: { id: pos.id }, data: { trailingActive: true } });
+      await audit('TRAILING_ARMED_EARLY', `+${pnlPercent.toFixed(1)}% reached (arm threshold ${settings.trailingArmPercent}%); trailing stop ${settings.trailingStopPercent}% armed`, { positionId: pos.id });
+      await telegramBot.sendTrailingArmedNotice(pos.id, pnlPercent, settings.trailingStopPercent);
+      return;
+    }
+
+    // 3. TRAILING STOP: armed early above, or after hitting full take-profit below; locks in gains
     if (pos.trailingActive && settings.trailingStopPercent > 0) {
       const drawdown = ((peakPrice - currentPrice) / peakPrice) * 100;
       if (drawdown >= settings.trailingStopPercent) {
@@ -74,7 +83,7 @@ export class PositionMonitorService {
       return;
     }
 
-    // 3. TAKE-PROFIT
+    // 4. TAKE-PROFIT
     if (pnlPercent >= pos.nextTpThreshold) {
       if (settings.autoTradeMode) {
         if (settings.trailingStopPercent > 0) {

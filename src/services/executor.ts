@@ -44,6 +44,13 @@ export type ExitReason =
   | 'manual';
 
 const FEE_BUFFER_SOL = 0.01; // ATA rent + priority fee headroom per swap
+const MAX_SWAP_ATTEMPTS = 3; // a blockhash-expired swap is provably dead — safe to retry with a fresh one
+
+/** Pulls the signature out of an AMBIGUOUS_SWAP error raised by executeJupiterSwap, if any */
+function extractAmbiguousSig(err: any): string | null {
+  const m = /AMBIGUOUS_SWAP (\S+):/.exec(err?.message || '');
+  return m ? m[1] : null;
+}
 
 export class TradeExecutor {
   /** Paper unless explicitly live AND a key exists. Simulated signals are always paper. */
@@ -296,25 +303,53 @@ export class TradeExecutor {
     const solPrice = await getSolPriceUsd();
     if (solPrice <= 0) throw new Error('SOL price unavailable');
 
-    const lamports = BigInt(Math.floor((amountUsd / solPrice) * LAMPORTS_PER_SOL));
-    const quote = await getJupiterQuote(WSOL_MINT, mint, lamports, settings.slippageBps);
-    if (!quote) throw new Error('No Jupiter route for buy');
-    const impact = Number(quote.priceImpactPct || 0) * 100;
-    if (impact > settings.maxPriceImpactPct) throw new Error(`Price impact ${impact.toFixed(1)}% exceeds limit`);
-
-    logger.info({ mint, lamports: lamports.toString(), outAmount: quote.outAmount }, 'Sending live Jupiter BUY');
-    const txHash = await executeJupiterSwap(quote, kp, settings.maxPriorityFee);
-
-    // Use the confirmed on-chain deltas rather than the quote
     const owner = kp.publicKey.toBase58();
-    const parsed = await fetchNormalizedTx(txHash, owner);
-    const received = parsed?.tokenDeltas[mint];
-    const balance = await getTokenBalance(owner, mint);
-    const decimals = received?.decimals ?? balance.decimals;
-    const tokenAmount = received?.delta && received.delta > 0 ? received.delta : Number(quote.outAmount) / 10 ** decimals;
-    const costSol = parsed ? Math.max(0, -parsed.solDelta) : Number(lamports) / LAMPORTS_PER_SOL;
+    const lamports = BigInt(Math.floor((amountUsd / solPrice) * LAMPORTS_PER_SOL));
 
-    return { txHash, tokenAmount, rawAmount: balance.raw.toString(), decimals, costSol };
+    let lastErr: any;
+    for (let attempt = 1; attempt <= MAX_SWAP_ATTEMPTS; attempt++) {
+      const quote = await getJupiterQuote(WSOL_MINT, mint, lamports, settings.slippageBps);
+      if (!quote) throw new Error('No Jupiter route for buy');
+      const impact = Number(quote.priceImpactPct || 0) * 100;
+      if (impact > settings.maxPriceImpactPct) throw new Error(`Price impact ${impact.toFixed(1)}% exceeds limit`);
+
+      logger.info({ mint, attempt, lamports: lamports.toString(), outAmount: quote.outAmount }, 'Sending live Jupiter BUY');
+      try {
+        const txHash = await executeJupiterSwap(quote, kp, settings.maxPriorityFee);
+        // Use the confirmed on-chain deltas rather than the quote
+        const parsed = await fetchNormalizedTx(txHash, owner);
+        const received = parsed?.tokenDeltas[mint];
+        const balance = await getTokenBalance(owner, mint);
+        const decimals = received?.decimals ?? balance.decimals;
+        const tokenAmount = received?.delta && received.delta > 0 ? received.delta : Number(quote.outAmount) / 10 ** decimals;
+        const costSol = parsed ? Math.max(0, -parsed.solDelta) : Number(lamports) / LAMPORTS_PER_SOL;
+        return { txHash, tokenAmount, rawAmount: balance.raw.toString(), decimals, costSol };
+      } catch (err: any) {
+        const sig = extractAmbiguousSig(err);
+        if (sig) {
+          // Confirmation was ambiguous — check the wallet directly before deciding.
+          const balance = await getTokenBalance(owner, mint);
+          if (balance.raw > 0n) {
+            // Tokens actually arrived — recover the position instead of discarding it.
+            logger.warn({ mint, sig }, 'BUY landed on-chain despite confirmation timeout — recovering position from wallet balance');
+            const parsed = await fetchNormalizedTx(sig, owner).catch(() => null);
+            const costSol = parsed ? Math.max(0, -parsed.solDelta) : Number(lamports) / LAMPORTS_PER_SOL;
+            return { txHash: sig, tokenAmount: balance.ui, rawAmount: balance.raw.toString(), decimals: balance.decimals, costSol };
+          }
+          // Nothing arrived. The original tx referenced a now-expired blockhash, which
+          // Solana guarantees can never be processed later — it is provably dead, so a
+          // fresh attempt carries zero risk of double-spending the same buy.
+          logger.warn({ mint, sig, attempt }, 'BUY confirmed dead on-chain (blockhash expired, no tokens received) — retrying with a fresh quote');
+        } else if (/failed on-chain/i.test(err?.message || '')) {
+          // Definite on-chain rejection before any funds moved — also safe to retry.
+          logger.warn({ mint, attempt, err: err.message }, 'BUY failed on-chain — retrying with a fresh quote');
+        } else {
+          throw err; // no key, no route, price impact, RPC down, etc. — don't retry
+        }
+        lastErr = err;
+      }
+    }
+    throw lastErr;
   }
 
   private async liveSell(mint: string, settings: BotSettingsData) {
@@ -327,15 +362,44 @@ export class TradeExecutor {
 
     // Slippage widens on exits: getting out matters more than the last few %
     const slippage = Math.min(5000, settings.slippageBps * 2);
-    const quote = await getJupiterQuote(mint, WSOL_MINT, balance.raw, slippage);
-    if (!quote) throw new Error('No Jupiter route for sell');
 
-    logger.info({ mint, amount: balance.raw.toString(), outLamports: quote.outAmount }, 'Sending live Jupiter SELL');
-    const txHash = await executeJupiterSwap(quote, kp, settings.maxPriorityFee);
-    const parsed = await fetchNormalizedTx(txHash, owner);
-    const solReceived = parsed ? Math.max(0, parsed.solDelta) : Number(quote.outAmount) / LAMPORTS_PER_SOL;
+    let lastErr: any;
+    for (let attempt = 1; attempt <= MAX_SWAP_ATTEMPTS; attempt++) {
+      const quote = await getJupiterQuote(mint, WSOL_MINT, balance.raw, slippage);
+      if (!quote) throw new Error('No Jupiter route for sell');
 
-    return { txHash, solReceived, tokensSold: balance.ui };
+      logger.info({ mint, attempt, amount: balance.raw.toString(), outLamports: quote.outAmount }, 'Sending live Jupiter SELL');
+      try {
+        const txHash = await executeJupiterSwap(quote, kp, settings.maxPriorityFee);
+        const parsed = await fetchNormalizedTx(txHash, owner);
+        const solReceived = parsed ? Math.max(0, parsed.solDelta) : Number(quote.outAmount) / LAMPORTS_PER_SOL;
+        return { txHash, solReceived, tokensSold: balance.ui };
+      } catch (err: any) {
+        const sig = extractAmbiguousSig(err);
+        if (sig) {
+          // Confirmation was ambiguous — check the wallet directly before deciding.
+          const after = await getTokenBalance(owner, mint);
+          if (after.raw <= 0n) {
+            // Tokens are gone — the sell actually landed. Recover the proceeds instead
+            // of treating it as a failure (which would risk firing a second sell).
+            logger.warn({ mint, sig }, 'SELL landed on-chain despite confirmation timeout — recovering proceeds from wallet balance');
+            const parsed = await fetchNormalizedTx(sig, owner);
+            const solReceived = parsed ? Math.max(0, parsed.solDelta) : Number(quote.outAmount) / LAMPORTS_PER_SOL;
+            return { txHash: sig, solReceived, tokensSold: balance.ui };
+          }
+          // Tokens are still here. The original tx referenced a now-expired blockhash,
+          // which Solana guarantees can never be processed later — it's provably dead,
+          // so retrying can't double-sell the same tokens.
+          logger.warn({ mint, sig, attempt }, 'SELL confirmed dead on-chain (blockhash expired, tokens still held) — retrying with a fresh quote');
+        } else if (/failed on-chain/i.test(err?.message || '')) {
+          logger.warn({ mint, attempt, err: err.message }, 'SELL failed on-chain — retrying with a fresh quote');
+        } else {
+          throw err;
+        }
+        lastErr = err;
+      }
+    }
+    throw lastErr;
   }
 }
 
