@@ -760,7 +760,8 @@ function renderWhales() {
       return `<tr>
         <td class="mono"><a href="https://solscan.io/account/${esc(w.address)}" target="_blank" rel="noopener">${short(w.address)}</a></td>
         <td title="${esc(w.discoveredVia)}">${esc((w.label || '').slice(0, 34))}</td>
-        <td><span class="badge ${st}" title="${esc(w.profileReason)}">${esc(w.profileStatus.toUpperCase())}</span> ${w.isActive ? '<span class="badge neon">ON</span>' : ''}</td>
+        <td><span class="badge ${st}">${esc(w.profileStatus.toUpperCase())}</span> ${w.isActive ? '<span class="badge neon">ON</span>' : ''}
+          ${w.profileStatus === 'rejected' && w.profileReason ? `<div class="muted" style="font-size:11px;margin-top:3px">${esc(w.profileReason)}</div>` : ''}</td>
         <td class="num">${w.whaleScore ? Math.round(w.whaleScore) : '—'}</td>
         <td class="num">${w.closedTrades ? (w.winRate || 0).toFixed(0) + '%' : '—'}</td>
         <td class="num">${w.wins || 0}W/${w.losses || 0}L</td>
