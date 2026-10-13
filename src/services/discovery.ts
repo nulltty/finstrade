@@ -32,7 +32,10 @@ const SYSTEM_EXCLUDED_ADDRESSES = new Set([
 const MAX_PROFILES_PER_RUN = 20;
 const PAIR_TRADER_SAMPLE = 25;
 const MAX_WINNERS_PER_RUN = 8;
-const REPROFILE_ACTIVE_AFTER_MS = 12 * 3600 * 1000;
+// Shorter than the discovery cycle (default 60min) on purpose: with only a handful of
+// active whales, re-checking every single cycle costs a few extra API calls but catches
+// a degrading whale (losing streak) in ~1 cycle instead of waiting up to half a day.
+const REPROFILE_ACTIVE_AFTER_MS = 30 * 60 * 1000;
 const REPROFILE_REJECTED_AFTER_MS = 3 * 24 * 3600 * 1000;
 
 const PROFILE_TIMEOUT_MS = 120_000;
@@ -165,6 +168,7 @@ export class WhaleDiscoveryService {
   async extractCandidates(winner: { mint: string; pairAddress: string }): Promise<string[]> {
     const holders = new Set<string>();
     const traders = new Set<string>();
+    const insiders = new Set<string>();
 
     const report = await getJson(`${env.RUGCHECK_API_BASE}/v1/tokens/${winner.mint}/report`, 12000);
     if (report) {
@@ -176,7 +180,11 @@ export class WhaleDiscoveryService {
       }
       for (const h of report.topHolders || []) {
         const owner = h.owner || h.address;
-        if (!owner || h.insider || known.has(owner) || known.has(h.address)) continue;
+        if (!owner || known.has(owner) || known.has(h.address)) continue;
+        // Insiders get privileged early access — their "edge" is unrepeatable by a
+        // copy-trader who only sees the buy after it's on-chain, so never follow them,
+        // even if they also show up later in the pair's recent-traders list below.
+        if (h.insider) { insiders.add(owner); continue; }
         holders.add(owner);
       }
     }
@@ -203,7 +211,7 @@ export class WhaleDiscoveryService {
     }
 
     // Active traders first: holders of a pumping token are often exchanges or passive bags
-    return [...new Set([...traders, ...holders])].filter((a) => !SYSTEM_EXCLUDED_ADDRESSES.has(a));
+    return [...new Set([...traders, ...holders])].filter((a) => !SYSTEM_EXCLUDED_ADDRESSES.has(a) && !insiders.has(a));
   }
 
   /**

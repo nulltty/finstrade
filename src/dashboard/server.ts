@@ -13,6 +13,7 @@ import { systemStatus } from '../services/status.js';
 import { computeReadiness, buildReadinessReport } from '../services/readiness.js';
 import { getTradingKeypair, getSolBalance, getSolPriceUsd, getUsdToIdrRate } from '../services/solana.js';
 import { getApiHealthSummary } from '../services/apiHealth.js';
+import { createSessionToken, verifySessionToken, parseCookies, SESSION_COOKIE_NAME } from '../services/session.js';
 import { multiWalletScannerQueue, signalQueue, whaleDiscoveryQueue } from '../workers/queue.js';
 import { env, solanaRpcUrl } from '../config/index.js';
 import { logger } from '../services/logger.js';
@@ -46,16 +47,38 @@ const h = (fn: Handler): Handler => fn;
 export function createServer() {
   const app = express();
   app.use(express.json());
+  app.use(express.urlencoded({ extended: false }));
 
-  // HTTP Basic auth (any username) whenever COCKPIT_PASSWORD is set; webhooks use their own secret
+  // Login-page + session-cookie auth whenever COCKPIT_PASSWORD is set; webhooks use their own secret
   if (env.COCKPIT_PASSWORD) {
-    const expected = Buffer.from(env.COCKPIT_PASSWORD);
+    const LOGIN_USER = 'finstrade';
+    const expectedPass = Buffer.from(env.COCKPIT_PASSWORD);
+
+    app.post('/login', (req, res) => {
+      const { username, password } = req.body || {};
+      const given = Buffer.from(String(password || ''));
+      const userOk = username === LOGIN_USER;
+      const passOk = given.length === expectedPass.length && crypto.timingSafeEqual(given, expectedPass);
+      if (!userOk || !passOk) return res.redirect('/login.html?error=1');
+      res.cookie(SESSION_COOKIE_NAME, createSessionToken(LOGIN_USER), {
+        httpOnly: true,
+        sameSite: 'lax',
+        maxAge: 30 * 24 * 3600 * 1000,
+      });
+      res.redirect('/');
+    });
+
+    app.post('/logout', (_req, res) => {
+      res.clearCookie(SESSION_COOKIE_NAME);
+      res.redirect('/login.html');
+    });
+
     app.use((req, res, next) => {
-      if (req.path.startsWith('/api/webhook/') || req.path === '/health') return next();
-      const header = req.get('authorization') || '';
-      const given = Buffer.from(Buffer.from(header.replace(/^Basic /, ''), 'base64').toString().split(':').slice(1).join(':'));
-      if (given.length === expected.length && crypto.timingSafeEqual(given, expected)) return next();
-      res.set('WWW-Authenticate', 'Basic realm="Fins Trade"').status(401).send('Authentication required');
+      if (req.path.startsWith('/api/webhook/') || req.path === '/health' || req.path === '/login.html') return next();
+      const cookies = parseCookies(req.get('cookie'));
+      if (verifySessionToken(cookies[SESSION_COOKIE_NAME])) return next();
+      if (req.path.startsWith('/api/')) return res.status(401).json({ error: 'auth required' });
+      res.redirect('/login.html');
     });
   }
 
