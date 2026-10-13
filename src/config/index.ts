@@ -30,6 +30,7 @@ const envSchema = z.object({
   GOPLUS_API_BASE: z.string().default('https://api.gopluslabs.io'),
   DEXSCREENER_API_BASE: z.string().default('https://api.dexscreener.com'),
   BIRDEYE_API_KEY: z.string().optional().default(''),
+  BIRDEYE_API_BASE: z.string().default('https://public-api.birdeye.so'),
   RUGCHECK_API_BASE: z.string().default('https://api.rugcheck.xyz'),
   JUPITER_API_BASE: z.string().default('https://lite-api.jup.ag'),
   JUPITER_API_KEY: z.string().optional().default(''),

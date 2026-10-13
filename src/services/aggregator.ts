@@ -3,6 +3,7 @@ import { env, WSOL_MINT } from '../config/index.js';
 import { getJupiterQuote, getSolPriceUsd } from './solana.js';
 import { settingsService } from './settings.js';
 import { logger } from './logger.js';
+import { recordApiEvent, providerFromUrl, isTimeoutError } from './apiHealth.js';
 
 export interface AggregatedTokenMetrics {
   liquidityUsd: number;
@@ -46,12 +47,14 @@ const LOCKED_LP_PCT = 80;
 async function getJson(url: string, timeoutMs = 8000): Promise<any | null> {
   try {
     const res = await fetch(url, { signal: AbortSignal.timeout(timeoutMs) });
+    if (res.status === 429) recordApiEvent(providerFromUrl(url), '429', url.split('?')[0]);
     if (!res.ok) {
       logger.warn({ status: res.status, url: url.split('?')[0] }, 'Data source returned non-200');
       return null;
     }
     return await res.json();
   } catch (err: any) {
+    if (isTimeoutError(err)) recordApiEvent(providerFromUrl(url), 'timeout', url.split('?')[0]);
     logger.warn({ url: url.split('?')[0], err: err?.message }, 'Data source request failed');
     return null;
   }

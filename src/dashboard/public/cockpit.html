@@ -391,6 +391,12 @@
     </div>
   </section>
 
+  <!-- API health -->
+  <section class="panel" id="apiHealth">
+    <h2>API health <span class="tag">429 / timeout per provider — bukti untuk keputusan upgrade plan</span></h2>
+    <div id="apiHealthBody" class="muted" style="font-size:13px">Belum ada data.</div>
+  </section>
+
   <!-- Equity + funnel -->
   <section class="panel c8">
     <h2>Equity curve <span class="tag">realised PnL, per trade yang ditutup</span></h2>
@@ -955,6 +961,24 @@ async function refreshReadiness() {
     }
   } catch (e) { console.error(e); }
 }
+
+async function refreshApiHealth() {
+  try {
+    const rows = await api('/api/api-health');
+    if (!rows.length) { $('apiHealthBody').textContent = 'Belum ada event 429/timeout — provider aman.'; return; }
+    $('apiHealthBody').innerHTML = `<table><thead><tr>
+        <th>Provider</th><th>429 (1h)</th><th>Timeout (1h)</th><th>Total (24h)</th><th>Terakhir</th><th></th>
+      </tr></thead><tbody>${rows.map((r) => `<tr>
+        <td class="mono">${esc(r.provider)}</td>
+        <td class="num">${r.rateLimited1h}</td>
+        <td class="num">${r.timeouts1h}</td>
+        <td class="num">${r.count24h}</td>
+        <td class="mono muted" style="font-size:11px">${r.lastAt ? new Date(r.lastAt).toLocaleTimeString('en-GB', { hour12: false }) : '—'}</td>
+        <td>${r.upgradeSuggested ? '<span class="badge bad">pertimbangkan upgrade</span>' : '<span class="badge good">aman</span>'}</td>
+      </tr>`).join('')}</tbody></table>`;
+  } catch (e) { console.error(e); }
+}
+
 $('btnCopyReport').onclick = async () => {
   try {
     const res = await fetch('/api/readiness/export');
@@ -1126,6 +1150,8 @@ window.addEventListener('resize', () => { drawEquity(); drawScatter(); });
 refreshOverview().then(refreshData);
 refreshReadiness();
 setInterval(refreshReadiness, 30000);
+refreshApiHealth();
+setInterval(refreshApiHealth, 30000);
 setInterval(refreshOverview, 3000);
 setInterval(refreshData, 5000);
 </script>

@@ -4,6 +4,7 @@ import { walletProfiler } from './walletProfiler.js';
 import { rpc } from './solana.js';
 import { audit } from './audit.js';
 import { logger } from './logger.js';
+import { recordApiEvent, providerFromUrl, isTimeoutError } from './apiHealth.js';
 
 export interface DiscoveryResult {
   winnersScanned: number;
@@ -47,10 +48,34 @@ function profileWithTimeout(address: string) {
 async function getJson(url: string, timeoutMs = 8000): Promise<any | null> {
   try {
     const res = await fetch(url, { signal: AbortSignal.timeout(timeoutMs) });
+    if (res.status === 429) recordApiEvent(providerFromUrl(url), '429', url.split('?')[0]);
     if (!res.ok) return null;
     return await res.json();
-  } catch {
+  } catch (err: any) {
+    if (isTimeoutError(err)) recordApiEvent(providerFromUrl(url), 'timeout', url.split('?')[0]);
     return null;
+  }
+}
+
+/**
+ * Trending Solana tokens by 24h volume from Birdeye — a free-tier "token list" endpoint,
+ * used purely to widen the whale-discovery net alongside DexScreener's boosts/profiles.
+ */
+async function getBirdeyeTrendingMints(): Promise<string[]> {
+  if (!env.BIRDEYE_API_KEY) return [];
+  const url = `${env.BIRDEYE_API_BASE}/defi/token_trending?sort_by=volume24hUSD&sort_type=desc&offset=0&limit=20`;
+  try {
+    const res = await fetch(url, {
+      headers: { accept: 'application/json', 'x-chain': 'solana', 'X-API-KEY': env.BIRDEYE_API_KEY },
+      signal: AbortSignal.timeout(8000),
+    });
+    if (res.status === 429) recordApiEvent('birdeye', '429', 'token_trending');
+    if (!res.ok) return [];
+    const json = (await res.json()) as any;
+    return (json?.data?.tokens || []).map((t: any) => t.address).filter(Boolean);
+  } catch (err: any) {
+    if (isTimeoutError(err)) recordApiEvent('birdeye', 'timeout', 'token_trending');
+    return [];
   }
 }
 
@@ -98,18 +123,22 @@ export class WhaleDiscoveryService {
    * filtered to real winners with liquidity and volume.
    */
   async findWinningTokens(): Promise<Array<{ mint: string; symbol: string; pairAddress: string; change24h: number }>> {
-    const sources = await Promise.all([
-      getJson(`${env.DEXSCREENER_API_BASE}/token-boosts/top/v1`),
-      getJson(`${env.DEXSCREENER_API_BASE}/token-boosts/latest/v1`),
-      getJson(`${env.DEXSCREENER_API_BASE}/token-profiles/latest/v1`),
+    const [sources, birdeyeMints] = await Promise.all([
+      Promise.all([
+        getJson(`${env.DEXSCREENER_API_BASE}/token-boosts/top/v1`),
+        getJson(`${env.DEXSCREENER_API_BASE}/token-boosts/latest/v1`),
+        getJson(`${env.DEXSCREENER_API_BASE}/token-profiles/latest/v1`),
+      ]),
+      getBirdeyeTrendingMints(),
     ]);
     const mints = [
-      ...new Set(
-        sources
+      ...new Set([
+        ...birdeyeMints,
+        ...sources
           .flatMap((s) => (Array.isArray(s) ? s : []))
           .filter((t: any) => t.chainId === 'solana' && t.tokenAddress)
-          .map((t: any) => t.tokenAddress as string)
-      ),
+          .map((t: any) => t.tokenAddress as string),
+      ]),
     ].slice(0, 60);
 
     const winners: Array<{ mint: string; symbol: string; pairAddress: string; change24h: number }> = [];

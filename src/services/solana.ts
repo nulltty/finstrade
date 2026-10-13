@@ -4,10 +4,12 @@ import { env, solanaRpcUrl, WSOL_MINT, USDC_MINT, USDT_MINT } from '../config/in
 import { prisma } from '../db/prisma.js';
 import { encryptSecret, decryptSecret, isEncrypted } from './secrets.js';
 import { logger } from './logger.js';
+import { recordApiEvent, isTimeoutError } from './apiHealth.js';
 
 export const connection = new Connection(solanaRpcUrl, 'confirmed');
 
 const isPublicRpc = solanaRpcUrl.includes('api.mainnet-beta.solana.com');
+const RPC_PROVIDER = isPublicRpc ? 'solana-rpc-public' : 'helius-rpc';
 const MIN_RPC_GAP_MS = isPublicRpc ? 150 : 25;
 let lastRpcAt = 0;
 
@@ -31,6 +33,7 @@ export async function rpc<T = any>(method: string, params: any[], retries = 3): 
         signal: AbortSignal.timeout(10000),
       });
       if (res.status === 429) {
+        recordApiEvent(RPC_PROVIDER, '429', method);
         await sleep(1000 * (attempt + 1));
         continue;
       }
@@ -43,6 +46,7 @@ export async function rpc<T = any>(method: string, params: any[], retries = 3): 
       return json.result as T;
     } catch (err: any) {
       if (attempt === retries) {
+        if (isTimeoutError(err)) recordApiEvent(RPC_PROVIDER, 'timeout', method);
         logger.debug({ method, err: err?.message }, 'RPC call failed');
         return null;
       }
@@ -231,6 +235,7 @@ export async function getJupiterQuote(
     `&amount=${amountRaw.toString()}&slippageBps=${slippageBps}&restrictIntermediateTokens=true`;
   try {
     const res = await fetch(url, { headers: jupHeaders(), signal: AbortSignal.timeout(8000) });
+    if (res.status === 429) recordApiEvent('jupiter', '429', 'quote');
     if (!res.ok) {
       logger.debug({ status: res.status, inputMint, outputMint }, 'Jupiter quote non-200');
       return null;
@@ -239,6 +244,7 @@ export async function getJupiterQuote(
     if (!json?.outAmount) return null;
     return json as JupiterQuote;
   } catch (err: any) {
+    if (isTimeoutError(err)) recordApiEvent('jupiter', 'timeout', 'quote');
     logger.debug({ err: err?.message }, 'Jupiter quote failed');
     return null;
   }
@@ -267,6 +273,7 @@ export async function executeJupiterSwap(quote: JupiterQuote, keypair: Keypair, 
       },
     }),
   });
+  if (res.status === 429) recordApiEvent('jupiter', '429', 'swap-build');
   if (!res.ok) throw new Error(`Jupiter swap build failed: HTTP ${res.status} ${await res.text()}`);
   const { swapTransaction, lastValidBlockHeight } = (await res.json()) as any;
   if (!swapTransaction) throw new Error('Jupiter swap build returned no transaction');
@@ -293,6 +300,7 @@ export async function executeJupiterSwap(quote: JupiterQuote, keypair: Keypair, 
     // landed. Poll the signature directly for longer before giving up, so a real fill is
     // never mistaken for a failure and real money never goes untracked.
     logger.warn({ signature }, 'Swap confirmation timed out (blockhash expired) — polling signature status directly');
+    recordApiEvent('solana-confirm', 'timeout', signature);
     const outcome = await pollSignatureOutcome(signature);
     if (outcome === 'success') return signature;
     if (outcome === 'failed') throw new Error(`Swap ${signature} failed on-chain after blockhash expiry`);
@@ -435,6 +443,7 @@ export async function getRecentWalletTxs(
     try {
       const url = `https://api.helius.xyz/v0/addresses/${owner}/transactions?api-key=${env.HELIUS_API_KEY}&limit=${Math.min(100, opts.limit)}`;
       const res = await fetch(url, { signal: AbortSignal.timeout(15000) });
+      if (res.status === 429) recordApiEvent('helius-enhanced', '429', owner);
       if (res.ok) {
         const items = (await res.json()) as any[];
         const out: NormalizedTx[] = [];
@@ -445,6 +454,7 @@ export async function getRecentWalletTxs(
         return { txs: out, newestSignature: items[0]?.signature };
       }
     } catch (err: any) {
+      if (isTimeoutError(err)) recordApiEvent('helius-enhanced', 'timeout', owner);
       logger.debug({ owner, err: err?.message }, 'Helius history fetch failed, falling back to RPC');
     }
   }

@@ -114,7 +114,8 @@ PAPER_TRADING=true
 Yang **tidak perlu** diisi:
 - `SOLANA_PRIVATE_KEY`: bot membuat trading wallet sendiri (terenkripsi). Isi hanya kalau ingin memakai wallet yang sudah ada (lebih baik lewat `npm run wallet -- import <key>`).
 - `SECRETS_KEY`: kalau kosong, bot membuat `.secrets/master.key` sendiri.
-- `ALCHEMY_API_KEY`, `BIRDEYE_API_KEY`: tidak dipakai.
+- `ALCHEMY_API_KEY`: tidak dipakai.
+- `BIRDEYE_API_KEY`: opsional. Kalau diisi, dipakai sebagai sumber tambahan token trending (volume 24h) saat whale discovery — melebarkan jaring pencarian whale selain DexScreener.
 - `WATCHED_WALLETS`: opsional; bot mencari whale sendiri. Isi hanya kalau ada wallet tertentu yang ingin dipantau.
 
 ---

@@ -12,6 +12,7 @@ import { settingsService } from '../services/settings.js';
 import { systemStatus } from '../services/status.js';
 import { computeReadiness, buildReadinessReport } from '../services/readiness.js';
 import { getTradingKeypair, getSolBalance, getSolPriceUsd, getUsdToIdrRate } from '../services/solana.js';
+import { getApiHealthSummary } from '../services/apiHealth.js';
 import { multiWalletScannerQueue, signalQueue, whaleDiscoveryQueue } from '../workers/queue.js';
 import { env, solanaRpcUrl } from '../config/index.js';
 import { logger } from '../services/logger.js';
@@ -183,6 +184,9 @@ export function createServer() {
     const take = Math.min(200, Number(req.query.limit) || 80);
     res.json(await prisma.auditLog.findMany({ orderBy: { createdAt: 'desc' }, take }));
   }));
+
+  // 429 / timeout evidence per provider — the real signal for "time to upgrade?"
+  app.get('/api/api-health', h(async (_req, res) => res.json(getApiHealthSummary())));
 
   // ── Settings ────────────────────────────────────────────────────────────
   app.get('/api/settings', h(async (_req, res) => res.json(await settingsService.getPublicSettings())));
