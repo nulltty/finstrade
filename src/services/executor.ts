@@ -290,9 +290,18 @@ export class TradeExecutor {
       return { success: true, exitPrice, pnlPercent, pnlUsd, txHash };
     } catch (err: any) {
       // Release the claim so the monitor retries on the next tick
-      await prisma.position.update({ where: { id: positionId }, data: { status: 'open' } });
-      logger.error({ positionId, reason, err: err?.message }, 'SELL failed — position re-opened for retry');
+      const updated = await prisma.position.update({
+        where: { id: positionId },
+        data: { status: 'open', sellFailCount: { increment: 1 } },
+      });
+      logger.error({ positionId, reason, err: err?.message, sellFailCount: updated.sellFailCount }, 'SELL failed — position re-opened for retry');
       await audit('SELL_FAILED', `${reason}: ${err?.message}`, { positionId });
+
+      if (updated.sellFailCount === 3 || updated.sellFailCount % 10 === 0) {
+        const { telegramBot } = await import('../bot/telegram.js');
+        await telegramBot.sendSellStuckAlert(positionId, updated.sellFailCount, err?.message || 'unknown error');
+      }
+
       return { success: false, error: err?.message };
     }
   }

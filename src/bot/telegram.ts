@@ -444,6 +444,17 @@ export class TelegramBotService {
     );
   }
 
+  /** After several consecutive failed sell attempts — likely no liquidity/route left to exit via Jupiter */
+  async sendSellStuckAlert(positionId: string, failCount: number, lastError: string) {
+    const position = await prisma.position.findUnique({ where: { id: positionId } });
+    if (!position) return;
+    await this.notify(
+      `⚠️ <b>${esc(position.tokenSymbol)} tidak bisa dijual otomatis</b> (${failCount}x gagal berturut-turut)\n` +
+        `Error terakhir: ${esc(lastError)}\n` +
+        `Kemungkinan likuiditas hilang/rug. Bot akan tetap mencoba tiap siklus, tapi cek manual kalau perlu.`
+    );
+  }
+
   start() {
     this.init().catch((err) => logger.error({ err: err?.message }, 'Telegram init failed'));
   }

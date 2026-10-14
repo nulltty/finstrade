@@ -71,6 +71,7 @@ model Position {
   highestPnlPercent     Float                  @default(0) @map("highest_pnl_percent")
   nextTpThreshold       Float                  @default(100) @map("next_tp_threshold")
   status                String                 @default("open") // open, closing, closed
+  sellFailCount         Int                    @default(0) @map("sell_fail_count")
   exitPrice             Float?                 @map("exit_price")
   exitReason            String?                @map("exit_reason") // stop_loss, trailing_stop, take_profit_auto, take_profit_approved, take_profit_timeout, whale_exit, manual
   openedAt              DateTime               @default(now()) @map("opened_at")
