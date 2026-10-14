@@ -1,4 +1,4 @@
-import { Bot, InlineKeyboard } from 'grammy';
+import { Bot, InlineKeyboard, InputFile } from 'grammy';
 import { env } from '../config/index.js';
 import { prisma } from '../db/prisma.js';
 import { tradeExecutor } from '../services/executor.js';
@@ -208,6 +208,9 @@ export class TelegramBotService {
       }
 
       await ctx.reply(reply);
+      for (const img of agent.lastImages) {
+        await ctx.replyWithPhoto(new InputFile(img));
+      }
     });
   }
 

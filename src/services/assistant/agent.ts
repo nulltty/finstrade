@@ -33,6 +33,7 @@ dibantu?"), kecuali kalau memang butuh klarifikasi karena permintaan user ambigu
 
 export class Agent {
   lastToolCalls: string[] = [];
+  lastImages: Buffer[] = [];
 
   constructor(
     private tools: Record<string, (args: any) => any>,
@@ -41,6 +42,7 @@ export class Agent {
 
   async run(userMessage: string, history: Array<{ role: string; content: string }> = [], chatId?: number | string, maxTurns = 5): Promise<string> {
     this.lastToolCalls = [];
+    this.lastImages = [];
     const client = getLlmClient();
     const messages: any[] = [{ role: 'system', content: SYSTEM_PROMPT }, ...history, { role: 'user', content: userMessage }];
 
@@ -73,7 +75,13 @@ export class Agent {
           result = `Error: tool '${fnName}' tidak ditemukan`;
         } else {
           try {
-            result = String(await this.tools[fnName](args));
+            const toolResult = await this.tools[fnName](args);
+            if (toolResult && typeof toolResult === 'object' && 'text' in toolResult) {
+              result = toolResult.text;
+              if (toolResult.imageBuffer) this.lastImages.push(toolResult.imageBuffer);
+            } else {
+              result = String(toolResult);
+            }
           } catch (err: any) {
             result = `Error saat eksekusi ${fnName}: ${err?.message || err}`;
           }

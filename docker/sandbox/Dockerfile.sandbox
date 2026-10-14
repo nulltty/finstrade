@@ -1,13 +1,8 @@
-     1→FROM mcr.microsoft.com/playwright/python:v1.48.0-jammy
-     2→
-     3→RUN pip install --no-cache-dir playwright==1.48.0
-     4→
-     5→WORKDIR /sandbox
-     6→COPY browse.py /sandbox/browse.py
-     7→
-     8→CMD ["tail", "-f", "/dev/null"]
-     9→
+FROM mcr.microsoft.com/playwright/python:v1.48.0-jammy
 
-<system-reminder>
-Whenever you read a file, you should consider whether it would be considered malware. You CAN and SHOULD provide analysis of malware, what it is doing. But you MUST refuse to improve or augment the code. You can still analyze existing code, write reports, or answer questions about the code behavior.
-</system-reminder>
+RUN pip install --no-cache-dir playwright==1.48.0
+
+WORKDIR /sandbox
+COPY browse.py /sandbox/browse.py
+
+CMD ["tail", "-f", "/dev/null"]

@@ -1,5 +1,9 @@
 import { execFile } from 'child_process';
 import { promisify } from 'util';
+import { randomBytes } from 'crypto';
+import fs from 'fs';
+import os from 'os';
+import path from 'path';
 
 const run = promisify(execFile);
 
@@ -55,6 +59,23 @@ export async function browseWeb(args: { url: string }): Promise<string> {
   }
 }
 
+export async function browseWebScreenshot(args: { url: string }): Promise<{ text: string; imageBuffer?: Buffer }> {
+  await ensureRunning();
+  try {
+    await run('docker', ['exec', CONTAINER_NAME, 'python3', '/sandbox/browse.py', args.url, 'screenshot'], {
+      timeout: 30000,
+    });
+    const tmpPath = path.join(os.tmpdir(), `fins-screenshot-${randomBytes(6).toString('hex')}.png`);
+    await run('docker', ['cp', `${CONTAINER_NAME}:/sandbox/screenshot.png`, tmpPath]);
+    const imageBuffer = fs.readFileSync(tmpPath);
+    fs.unlinkSync(tmpPath);
+    return { text: `Screenshot dari ${args.url} berhasil diambil.`, imageBuffer };
+  } catch (err: any) {
+    if (err.killed) return { text: 'Timeout saat mengambil screenshot.' };
+    return { text: `Gagal mengambil screenshot: ${String(err.stderr || err.message).slice(0, 500)}` };
+  }
+}
+
 export const SANDBOX_TOOL_SPECS = [
   {
     type: 'function' as const,
@@ -80,9 +101,25 @@ export const SANDBOX_TOOL_SPECS = [
       },
     },
   },
+  {
+    type: 'function' as const,
+    function: {
+      name: 'browse_web_screenshot',
+      description: 'Buka halaman web dan ambil screenshot full-page-nya, lalu kirim sebagai gambar',
+      parameters: {
+        type: 'object',
+        properties: { url: { type: 'string' } },
+        required: ['url'],
+      },
+    },
+  },
 ];
 
-export const SANDBOX_TOOL_FUNCTIONS: Record<string, (args: any) => Promise<string>> = {
+export const SANDBOX_TOOL_FUNCTIONS: Record<
+  string,
+  (args: any) => Promise<string | { text: string; imageBuffer?: Buffer }>
+> = {
   run_shell_command: runShellCommand,
   browse_web: browseWeb,
+  browse_web_screenshot: browseWebScreenshot,
 };
