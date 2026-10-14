@@ -1,5 +1,6 @@
 import { prisma } from '../db/prisma.js';
 import { env } from '../config/index.js';
+import { settingsService } from './settings.js';
 import { logger } from './logger.js';
 
 export class CircuitBreakerService {
@@ -22,10 +23,16 @@ export class CircuitBreakerService {
 
     const windowStart = new Date(Date.now() - env.CIRCUIT_BREAKER_WINDOW_MINUTES * 60 * 1000);
 
-    // Count recent stop loss exits
+    // Count recent stop loss exits in the mode we are actually protecting. Counting both
+    // together let live losses from an earlier session halt a paper run, and would let paper
+    // experiments halt real trading. Archived history is excluded for the same reason it is
+    // hidden from the cockpit: it belongs to a run that no longer describes current behaviour.
+    const settings = await settingsService.getSettings();
     const recentStopLossCount = await prisma.position.count({
       where: {
         exitReason: 'stop_loss',
+        isPaper: settings.paperTrading,
+        archived: false,
         closedAt: { gte: windowStart },
       },
     });
