@@ -158,10 +158,11 @@ export function createServer() {
         })()
       : { ...wallet, simulated: false, startUsd: null };
 
+    // Same scope the breaker itself uses, so the number shown can't contradict the status
     const recentStopLosses = await prisma.position.count({
       where: {
         exitReason: 'stop_loss',
-        archived: false,
+        ...modeFilter,
         closedAt: { gte: new Date(Date.now() - env.CIRCUIT_BREAKER_WINDOW_MINUTES * 60000) },
       },
     });
