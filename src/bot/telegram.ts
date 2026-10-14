@@ -5,6 +5,35 @@ import { tradeExecutor } from '../services/executor.js';
 import { approvalTimeoutQueue } from '../workers/queue.js';
 import { settingsService } from '../services/settings.js';
 import { logger } from '../services/logger.js';
+import { Agent } from '../services/assistant/agent.js';
+import { FINANCE_TOOL_SPECS, FINANCE_TOOL_FUNCTIONS, addExpense } from '../services/assistant/financeTools.js';
+import { VAULT_TOOL_SPECS, VAULT_TOOL_FUNCTIONS, VAULT_TOOL_NAMES } from '../services/assistant/vaultTools.js';
+import { SANDBOX_TOOL_SPECS, SANDBOX_TOOL_FUNCTIONS } from '../services/assistant/sandboxTools.js';
+import { TRADE_TOOL_SPECS, TRADE_TOOL_FUNCTIONS } from '../services/assistant/tradeTools.js';
+import { extractReceipt } from '../services/assistant/vision.js';
+import { saveMessage, recall } from '../services/assistant/memory.js';
+
+const ASSISTANT_TOOL_SPECS = [...FINANCE_TOOL_SPECS, ...VAULT_TOOL_SPECS, ...SANDBOX_TOOL_SPECS, ...TRADE_TOOL_SPECS];
+const ASSISTANT_TOOL_FUNCTIONS: Record<string, (args: any) => any> = {
+  ...FINANCE_TOOL_FUNCTIONS,
+  ...VAULT_TOOL_FUNCTIONS,
+  ...SANDBOX_TOOL_FUNCTIONS,
+  ...TRADE_TOOL_FUNCTIONS,
+};
+
+// Short-term chat history shared between the NL assistant and every automated notification
+// (buy/sell/stop-loss/etc) — so the agent "remembers" its own notifications instead of
+// treating them as an ambiguous third party when the user asks about one.
+const MAX_HISTORY = 20;
+const assistantHistories = new Map<string, Array<{ role: string; content: string }>>();
+// Receipt extraction waiting for the user to type a category (or "batal")
+const pendingReceipts = new Map<string, { merchant?: string; date?: string | null; total?: number; items?: any[] }>();
+
+function pushHistory(chatId: string, role: string, content: string) {
+  const h = assistantHistories.get(chatId) || [];
+  h.push({ role, content });
+  assistantHistories.set(chatId, h.slice(-MAX_HISTORY));
+}
 
 const esc = (s: unknown) => String(s ?? '').replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
 const usd = (n: number | null | undefined) =>
@@ -66,6 +95,13 @@ export class TelegramBotService {
     return admins.length === 0 || (userId !== undefined && admins.includes(String(userId)));
   }
 
+  /** Stricter than isAdmin(): the free-text/photo assistant surfaces personal finance,
+   *  vault passwords, and trading controls — requires an explicit allow-list, no open-by-default. */
+  private isAssistantAllowed(userId?: number) {
+    if (!env.ASSISTANT_ALLOWED_USER_ID) return false;
+    return userId !== undefined && String(userId) === env.ASSISTANT_ALLOWED_USER_ID.trim();
+  }
+
   private setupHandlers() {
     if (!this.bot) return;
 
@@ -102,6 +138,77 @@ export class TelegramBotService {
 
       await ctx.answerCallbackQuery();
     });
+
+    this.bot.on('message:photo', async (ctx) => {
+      if (!this.isAssistantAllowed(ctx.from?.id)) return;
+      const chatId = String(ctx.chat.id);
+      await ctx.reply('Lagi baca struk...');
+
+      const photo = ctx.message.photo[ctx.message.photo.length - 1];
+      const file = await ctx.api.getFile(photo.file_id);
+      const url = `https://api.telegram.org/file/bot${this.activeToken}/${file.file_path}`;
+      const imageBytes = Buffer.from(await (await fetch(url)).arrayBuffer());
+
+      const data = await extractReceipt(imageBytes);
+      if (data.error) {
+        await ctx.reply(data.error);
+        return;
+      }
+
+      pendingReceipts.set(chatId, data);
+      const items = (data.items || []).map((i: any) => `${i.name} (${i.price})`).join(', ');
+      await ctx.reply(
+        `Terdeteksi:\nToko: ${data.merchant}\nTanggal: ${data.date}\nTotal: Rp${data.total}\nItem: ${items}\n\n` +
+          `Balas kategori (misal 'makan') untuk simpan, atau 'batal' untuk buang.`
+      );
+    });
+
+    this.bot.on('message:text', async (ctx) => {
+      if (ctx.message.text.startsWith('/')) return; // commands handled above
+      if (!this.isAssistantAllowed(ctx.from?.id)) return;
+
+      const chatId = String(ctx.chat.id);
+      const text = ctx.message.text;
+
+      const pending = pendingReceipts.get(chatId);
+      if (pending) {
+        pendingReceipts.delete(chatId);
+        if (['batal', 'cancel', 'no'].includes(text.trim().toLowerCase())) {
+          await ctx.reply('Oke, struk dibuang.');
+          return;
+        }
+        const result = addExpense({
+          amount: pending.total || 0,
+          category: text.trim(),
+          note: pending.merchant || '',
+          date: pending.date || undefined,
+        });
+        await ctx.reply(result);
+        return;
+      }
+
+      const history = assistantHistories.get(chatId) || [];
+      const recalled = await recall(chatId, text);
+      const augmentedHistory = recalled.length
+        ? [{ role: 'system', content: 'Catatan dari percakapan lama yang relevan:\n' + recalled.map((r) => `- ${r}`).join('\n') }, ...history]
+        : history;
+
+      const agent = new Agent(ASSISTANT_TOOL_FUNCTIONS, ASSISTANT_TOOL_SPECS);
+      const reply = await agent.run(text, augmentedHistory, chatId);
+
+      pushHistory(chatId, 'user', text);
+      pushHistory(chatId, 'assistant', reply);
+
+      // Don't persist to long-term memory when a vault tool was touched this turn, so raw
+      // passwords don't spread into the recall store.
+      const touchedVault = agent.lastToolCalls.some((t) => VAULT_TOOL_NAMES.has(t));
+      if (!touchedVault) {
+        await saveMessage(chatId, 'user', text);
+        await saveMessage(chatId, 'assistant', reply);
+      }
+
+      await ctx.reply(reply);
+    });
   }
 
   /** Send a message; returns its id, or null when Telegram isn't configured / fails */
@@ -116,6 +223,7 @@ export class TelegramBotService {
         reply_markup: keyboard,
         link_preview_options: { is_disabled: true },
       });
+      pushHistory(this.chatId, 'assistant', text.replace(/<[^>]+>/g, ''));
       return msg.message_id;
     } catch (err: any) {
       logger.error({ err: err?.message }, 'Failed to send Telegram message');

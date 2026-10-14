@@ -90,7 +90,42 @@ contoh: interval 20s × 30 whale  ≈ 130.000 panggilan/hari
 
 ---
 
-## 5. Isi file `.env`
+## 5. Asisten AI "Fins" (opsional) — chat bebas lewat Telegram
+
+Bot Telegram yang sama juga berfungsi sebagai asisten pribadi bernama **Fins**: catat keuangan, simpan password (vault terenkripsi), ingat percakapan lama, baca struk foto (OCR), jalankan sandbox Docker (shell/browse web), dan **tanya-jawab soal bot trading** (cari whale baru, daftar whale, posisi, profit/loss, saldo wallet, status API provider, halt/resume buy, lihat setting). Fins **tidak pernah** bisa eksekusi buy/sell/close posisi langsung dari chat — itu tetap lewat tombol approve/skip di cockpit.
+
+Fitur ini jalan lokal lewat **LM Studio** (gratis, tanpa API key, data tidak keluar dari komputer kamu).
+
+### a. Install & jalankan LM Studio
+1. Download **LM Studio** dari https://lmstudio.ai dan install.
+2. Di LM Studio, download model chat (contoh: `qwen/qwen3.5-9b`) dan model embedding (contoh: `text-embedding-nomic-embed-text-v1.5`).
+3. Jalankan local server di LM Studio (Developer → Start Server), pastikan port-nya **1235** (atau sesuaikan `LMSTUDIO_BASE_URL` di `.env`).
+
+### b. Batasi siapa yang boleh chat dengan Fins
+Fins bisa membaca/ubah data keuangan pribadi, password vault, dan kontrol bot — jadi defaultnya **tertutup total** sampai diisi:
+```env
+ASSISTANT_ALLOWED_USER_ID="123456789"
+```
+Isi dengan Telegram user ID kamu sendiri (lihat cara ambil user ID di bagian 3b). Kalau kosong, fitur chat bebas & foto struk ini nonaktif (notifikasi trading tetap jalan normal).
+
+### c. (Opsional) Sandbox Docker untuk shell/browse web
+Kalau ingin Fins bisa jalankan command shell atau browsing web di sandbox terisolasi:
+```bash
+docker build -t finsassiant-sandbox -f assistant/docker/Dockerfile.sandbox assistant/docker
+```
+Sandbox jalan dengan `--cap-drop=ALL --security-opt=no-new-privileges`, tanpa akses filesystem host.
+
+### d. Variabel `.env` terkait
+```env
+LMSTUDIO_BASE_URL="http://localhost:1235/v1"
+LMSTUDIO_MODEL="qwen/qwen3.5-9b"
+LMSTUDIO_EMBEDDING_MODEL="text-embedding-nomic-embed-text-v1.5"
+ASSISTANT_ALLOWED_USER_ID="123456789"
+```
+
+---
+
+## 6. Isi file `.env`
 
 ```bash
 cp .env.example .env
@@ -120,7 +155,7 @@ Yang **tidak perlu** diisi:
 
 ---
 
-## 6. Menjalankan
+## 7. Menjalankan
 
 ### Opsi A — Mac Studio 24/7 (disarankan, hemat daya)
 
@@ -194,7 +229,7 @@ Lalu buka cockpit: **http://127.0.0.1:3000**
 
 ---
 
-## 7. Trading wallet & dana
+## 8. Trading wallet & dana
 
 Saat pertama kali jalan, bot membuat **wallet khusus trading** dan menampilkan alamatnya di cockpit (panel *Trading Wallet*) dan di log. Bisa juga dilihat dengan:
 ```bash
@@ -213,7 +248,7 @@ npm run wallet
 
 ---
 
-## 8. Checklist sebelum LIVE
+## 9. Checklist sebelum LIVE
 
 > Cockpit punya panel **Live readiness** yang mengecek sebagian besar poin di bawah secara otomatis: jumlah trade, PnL setelah biaya, profit tanpa trade terbaik, drawdown, uptime, sell gagal, dan Telegram. Untuk second opinion: **Copy report for AI** (atau `./scripts/fins.sh report`) lalu tempel bersama [`prompts/live-readiness-review.md`](prompts/live-readiness-review.md) ke AI lain.
 
@@ -231,7 +266,7 @@ Tombol **⏻ HALT BUYS** di cockpit menghentikan semua pembelian baru seketika. 
 
 ---
 
-## 9. Troubleshooting
+## 10. Troubleshooting
 
 | Gejala | Penyebab / solusi |
 |---|---|

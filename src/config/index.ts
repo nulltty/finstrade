@@ -23,6 +23,13 @@ const envSchema = z.object({
   TELEGRAM_CHAT_ID: z.string().default(''),
   TELEGRAM_ADMIN_IDS: z.string().default(''),
 
+  // Personal AI assistant (Fin) merged into the same bot — local LM Studio, OpenAI-compatible API
+  LMSTUDIO_BASE_URL: z.string().default('http://localhost:1235/v1'),
+  LMSTUDIO_MODEL: z.string().default('qwen/qwen3.5-9b'),
+  LMSTUDIO_EMBEDDING_MODEL: z.string().default('text-embedding-nomic-embed-text-v1.5'),
+  // Required for the free-text/photo assistant handlers — no default, must be explicit
+  ASSISTANT_ALLOWED_USER_ID: z.string().default(''),
+
   HELIUS_API_KEY: z.string().optional().default(''),
   ALCHEMY_API_KEY: z.string().optional().default(''),
   WATCHED_WALLETS: z.string().default(''),
