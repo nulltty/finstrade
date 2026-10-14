@@ -215,7 +215,7 @@
   th { text-align: left; padding: 8px 10px; border-bottom: 1px solid var(--line-strong); white-space: nowrap; font-weight: 500; }
   td { padding: 9px 10px; border-bottom: 1px solid var(--line); vertical-align: middle; white-space: nowrap; }
   tr:hover td { background: var(--faint); }
-  td.num, th.num { text-align: right; font-family: var(--mono); font-size: 12px; }
+  td.num, th.num { font-family: var(--mono); font-size: 12px; }
   .empty { padding: 28px; text-align: center; color: var(--muted); font: italic 400 17px var(--serif); }
   .badge {
     display: inline-block; padding: 2px 6px; font: 700 9.5px var(--mono); letter-spacing: .1em; text-transform: uppercase;
@@ -761,7 +761,9 @@ function renderWhales() {
   $('whaleTag').textContent = `${state.wallets.filter((w) => w.isActive).length} dipantau · ${state.wallets.length} total`;
   if (!list.length) { $('whales').innerHTML = '<div class="empty">Kosong. Discovery berjalan otomatis — klik ⚡ untuk memulai sekarang.</div>'; return; }
   $('whales').innerHTML = `<table><thead><tr><th>Wallet</th><th>Label</th><th>Status</th><th class="num">Score</th><th class="num">Win rate</th>
-    <th class="num">Closed</th><th class="num">PnL (SOL)</th><th class="num">Avg hold</th><th class="num">Signals</th><th class="num">Scanned</th><th></th></tr></thead><tbody>
+    <th class="num">Closed</th><th class="num">PnL (SOL)</th><th class="num" title="Saldo SOL cair — 'amunisi' whale untuk beli lagi">SOL</th>
+    <th class="num" title="Estimasi total isi wallet (SOL + token yang bisa dihargai). Nilai dasar: mint yang tidak ketemu harganya dilewati">Est. aset</th>
+    <th class="num">Avg hold</th><th class="num">Signals</th><th class="num">Scanned</th><th></th></tr></thead><tbody>
     ${list.slice(0, 150).map((w) => {
       const st = w.profileStatus === 'qualified' ? 'good' : w.profileStatus === 'rejected' ? 'bad' : 'warn';
       return `<tr>
@@ -773,6 +775,8 @@ function renderWhales() {
         <td class="num">${w.closedTrades ? (w.winRate || 0).toFixed(0) + '%' : '—'}</td>
         <td class="num">${w.wins || 0}W/${w.losses || 0}L</td>
         <td class="num ${cls(w.realizedPnlSol)}">${w.closedTrades ? (w.realizedPnlSol >= 0 ? '+' : '−') + Math.abs(w.realizedPnlSol).toFixed(2) : '—'}</td>
+        <td class="num" title="${w.balanceAt ? 'Snapshot ' + ago(w.balanceAt) : 'Belum pernah diambil'}">${w.balanceSol != null ? w.balanceSol.toFixed(2) : '—'}</td>
+        <td class="num" title="${w.balanceAt ? 'Snapshot ' + ago(w.balanceAt) : 'Belum pernah diambil'}">${w.portfolioUsd != null ? fmtUsd(w.portfolioUsd) : '—'}</td>
         <td class="num">${w.avgHoldMinutes ? (w.avgHoldMinutes < 120 ? w.avgHoldMinutes.toFixed(0) + 'm' : (w.avgHoldMinutes / 60).toFixed(1) + 'h') : '—'}</td>
         <td class="num">${w.signalsTriggered || 0}</td>
         <td class="num">${ago(w.lastScannedAt)}</td>

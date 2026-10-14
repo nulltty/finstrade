@@ -1,6 +1,7 @@
 import { prisma } from '../db/prisma.js';
 import { env } from '../config/index.js';
-import { getRecentWalletTxs, getSolPriceUsd, NormalizedTx } from './solana.js';
+import { getRecentWalletTxs, getSolPriceUsd, getSolBalance, getTokenHoldings, NormalizedTx } from './solana.js';
+import { tokenDataAggregator } from './aggregator.js';
 import { settingsService } from './settings.js';
 import { audit } from './audit.js';
 import { logger } from './logger.js';
@@ -24,6 +25,7 @@ export interface WalletProfile {
 const MIN_QUOTE_SOL = 0.01; // ignore fee-only / dust movements
 const MIN_AVG_BUY_SOL = 0.3; // below this it's not a whale
 const MIN_COPYABLE_HOLD_MIN = 2; // faster than this = sniper/MEV bot we can't follow in time
+const PRICED_MINT_CAP = 60; // 2 DexScreener batches — dust beyond this barely moves the total
 
 interface MintBook {
   boughtTokens: number;
@@ -134,11 +136,39 @@ export class WalletProfilerService {
   }
 
   /**
+   * What the wallet is holding right now. The SOL leg is exact; the token leg is a floor —
+   * mints DexScreener cannot price are skipped rather than guessed, and only the first
+   * PRICED_MINT_CAP mints are looked up so a wallet full of dust can't fan out into dozens
+   * of pricing calls.
+   */
+  async valueWallet(address: string): Promise<{ balanceSol: number | null; portfolioUsd: number | null }> {
+    const [balanceSol, solPrice] = await Promise.all([getSolBalance(address), getSolPriceUsd()]);
+    if (balanceSol === null) return { balanceSol: null, portfolioUsd: null };
+    if (solPrice <= 0) return { balanceSol, portfolioUsd: null };
+
+    let portfolioUsd = balanceSol * solPrice;
+    try {
+      const holdings = await getTokenHoldings(address);
+      if (holdings.length > 0) {
+        const prices = await tokenDataAggregator.fetchPrices(holdings.slice(0, PRICED_MINT_CAP).map((h) => h.mint));
+        for (const h of holdings) {
+          const price = prices.get(h.mint);
+          if (price) portfolioUsd += h.ui * price;
+        }
+      }
+    } catch (err: any) {
+      logger.debug({ address, err: err?.message }, 'Token leg of wallet valuation failed — reporting SOL only');
+    }
+    return { balanceSol, portfolioUsd };
+  }
+
+  /**
    * Profile a wallet and persist the result. Auto-discovered wallets are activated
    * only if they qualify; manually added wallets keep the user's on/off choice.
    */
   async profileAndSave(address: string): Promise<WalletProfile> {
     const profile = await this.profileWallet(address);
+    const value = await this.valueWallet(address);
     const existing = await prisma.watchedWallet.findUnique({ where: { address } });
     const isManual = existing?.discoveredVia === 'manual_dashboard' || existing?.discoveredVia === 'env_config';
 
@@ -154,6 +184,8 @@ export class WalletProfilerService {
       avgHoldMinutes: profile.avgHoldMinutes,
       whaleScore: profile.whaleScore,
       lastProfiledAt: new Date(),
+      // Keep the last good snapshot rather than blanking it when a balance read fails
+      ...(value.balanceSol !== null ? { balanceSol: value.balanceSol, portfolioUsd: value.portfolioUsd, balanceAt: new Date() } : {}),
       ...(isManual ? {} : { isActive: profile.qualified }),
     };
 

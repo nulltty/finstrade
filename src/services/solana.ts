@@ -138,6 +138,29 @@ export async function getSolBalance(address: string): Promise<number | null> {
   return res ? res.value / LAMPORTS_PER_SOL : null;
 }
 
+const TOKEN_PROGRAMS = [
+  'TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA', // SPL Token
+  'TokenzQdBNbLqP5VEhdkAS6EPFLC1PHnBqCXEpPxuEb', // Token-2022
+];
+
+/** Every non-zero token balance the wallet holds — one RPC call per token program */
+export async function getTokenHoldings(owner: string): Promise<{ mint: string; ui: number }[]> {
+  const out: { mint: string; ui: number }[] = [];
+  for (const programId of TOKEN_PROGRAMS) {
+    const res = await rpc<any>('getTokenAccountsByOwner', [
+      owner,
+      { programId },
+      { encoding: 'jsonParsed', commitment: 'confirmed' },
+    ]);
+    for (const acc of res?.value || []) {
+      const info = acc.account?.data?.parsed?.info;
+      const ui = Number(info?.tokenAmount?.uiAmount || 0);
+      if (info?.mint && ui > 0) out.push({ mint: info.mint, ui });
+    }
+  }
+  return out;
+}
+
 export async function getTokenBalance(owner: string, mint: string): Promise<{ raw: bigint; decimals: number; ui: number }> {
   const res = await rpc<any>('getTokenAccountsByOwner', [owner, { mint }, { encoding: 'jsonParsed', commitment: 'confirmed' }]);
   let raw = 0n;
