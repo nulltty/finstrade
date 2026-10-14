@@ -153,7 +153,7 @@ cat > "$PLIST" <<PLIST_EOF
   <key>WorkingDirectory</key><string>$ROOT</string>
   <key>EnvironmentVariables</key>
   <dict>
-    <key>PATH</key><string>$NODE_BIN:$PG_BIN:/opt/homebrew/bin:/usr/bin:/bin:/usr/sbin:/sbin</string>
+    <key>PATH</key><string>$NODE_BIN:$PG_BIN:/opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin:/usr/sbin:/sbin</string>
     <key>LOG_FILE</key><string>$LOG_DIR/fins.log</string>
   </dict>
   <key>RunAtLoad</key><true/>
