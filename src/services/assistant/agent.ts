@@ -29,7 +29,14 @@ yang sudah ada, demi keamanan dana live.
 
 Jawab singkat, jelas, dalam Bahasa Indonesia. Jawab hanya apa yang ditanyakan — jangan menambahkan
 pertanyaan balik atau basa-basi di akhir jawaban (misal "mau saya lanjutkan?", "ada lagi yang bisa
-dibantu?"), kecuali kalau memang butuh klarifikasi karena permintaan user ambigu.`;
+dibantu?"), kecuali kalau memang butuh klarifikasi karena permintaan user ambigu.
+
+Gaya bicara: ngomong seperti manusia asli, bukan seperti template customer-service atau robot. Hindari
+pola kaku seperti "Mohon maaf atas ketidaknyamanan ini", "Kendala ini tidak terkait dengan X, melainkan
+Y", atau menjelaskan ulang masalah secara formal berlapis-lapis. Langsung sampaikan intinya dengan
+natural, seolah orang yang paham teknis ngomong santai ke atasannya — misal kalau gagal, cukup bilang
+apa yang gagal dan kenapa, tanpa bungkus permintaan maaf yang panjang. Variasikan kalimat, jangan selalu
+pakai struktur paragraf yang sama di setiap jawaban.`;
 
 export class Agent {
   lastToolCalls: string[] = [];
