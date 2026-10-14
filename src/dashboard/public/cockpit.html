@@ -364,8 +364,8 @@
       <span class="right"><button class="sm" id="btnCopy">Copy address</button></span></h2>
     <div class="wallet">
       <div><div class="lbl">Address</div><div class="addr" id="wAddr">—</div></div>
-      <div><div class="lbl">Balance</div><div class="big" id="wSol">—</div></div>
-      <div><div class="lbl">Value</div><div class="big t2" id="wUsd">—</div><div class="muted" style="font-size:12px" id="wIdr"></div></div>
+      <div><div class="lbl" id="wBalLbl">Balance</div><div class="big" id="wSol">—</div></div>
+      <div><div class="lbl">Value</div><div class="big t2" id="wUsd">—</div><div class="muted" style="font-size:12px" id="wIdr"></div><div class="muted" style="font-size:12px" id="wBase"></div></div>
       <div><div class="lbl">SOL / USD</div><div class="big t2" id="wPrice">—</div></div>
       <div><div class="lbl">RPC</div><div class="big t2" id="wRpc">—</div></div>
       <div class="fund-hint" id="fundHint" hidden></div>
@@ -561,13 +561,20 @@ function renderOverview(o) {
 
   const w = o.wallet;
   $('wAddr').textContent = w.address || 'belum ada';
+  $('wBalLbl').textContent = w.simulated ? 'Balance (SIMULASI)' : 'Balance';
   $('wSol').textContent = w.sol == null ? '—' : `${w.sol.toFixed(4)} SOL`;
   $('wUsd').textContent = fmtUsd(w.usd);
   $('wIdr').textContent = w.idr == null ? '' : `≈ ${fmtIdr(w.idr)}`;
+  // In paper mode the figure above is simulated equity, so show what it started from and the
+  // delta — otherwise it reads like a real balance that happens to be wrong.
+  $('wBase').textContent =
+    w.simulated && w.startUsd != null
+      ? `modal awal ${fmtUsd(w.startUsd, 0)} · ${fmtSigned(w.usd - w.startUsd)} (${fmtPct(((w.usd - w.startUsd) / w.startUsd) * 100)})`
+      : '';
   $('wPrice').textContent = fmtUsd(w.solPrice);
   $('wRpc').textContent = o.rpc.toUpperCase();
   const hint = $('fundHint');
-  if (w.sol != null && w.sol < 0.05) {
+  if (!w.simulated && w.sol != null && w.sol < 0.05) {
     hint.hidden = false;
     hint.textContent = `Saldo rendah. Kirim SOL ke ${w.address} lalu aktifkan LIVE di Settings. Bot menyisakan ${s.solReserve} SOL untuk fee.`;
   } else if (s.paperTrading) {

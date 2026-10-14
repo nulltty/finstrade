@@ -51,6 +51,8 @@ model Score {
 
 model Position {
   id                    String                 @id @default(uuid())
+  /** Soft delete: kept for the record but excluded from the cockpit and its stats */
+  archived              Boolean                @default(false)
   signalId              String?                @map("signal_id")
   chain                 String
   tokenAddress          String                 @map("token_address")
@@ -87,6 +89,8 @@ model Position {
 
 model Trade {
   id                    String                 @id @default(uuid())
+  /** Soft delete: kept for the record but excluded from the cockpit and its stats */
+  archived              Boolean                @default(false)
   positionId            String?                @map("position_id")
   signalId              String?                @map("signal_id")
   side                  String                 // 'BUY', 'SELL'
@@ -171,6 +175,8 @@ model WatchedWallet {
 model BotSetting {
   id                    String                 @id @default("default")
   paperTrading          Boolean                @default(true) @map("paper_trading")
+  /// Starting cash a paper run is measured against, so paper equity reads like a real balance
+  paperStartBalanceUsd  Float                  @default(1000) @map("paper_start_balance_usd")
   chain                 String                 @default("solana")
   tradeAmountUsd        Float                  @default(25.0) @map("trade_amount_usd")
   maxOpenPositions      Int                    @default(5) @map("max_open_positions")

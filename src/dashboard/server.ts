@@ -45,6 +45,19 @@ async function walletSnapshot() {
 type Handler = (req: express.Request, res: express.Response) => Promise<any> | any;
 const h = (fn: Handler): Handler => fn;
 
+/**
+ * What the cockpit should count: the current mode's trades only, and never archived ones.
+ * Archived rows stay in the database as a record — soft-deleted history such as paper runs
+ * from an older fill model, which would distort today's stats if mixed in.
+ * ?includePaper=1 shows both modes, ?includeArchived=1 brings the archived rows back.
+ */
+function viewFilter(req: { query: Record<string, any> }, paperTrading: boolean) {
+  return {
+    ...(req.query.includePaper === '1' ? {} : { isPaper: paperTrading }),
+    ...(req.query.includeArchived === '1' ? {} : { archived: false }),
+  };
+}
+
 export function createServer() {
   const app = express();
   app.use(express.json());
@@ -102,7 +115,7 @@ export function createServer() {
     const settingsPreview = await settingsService.getPublicSettings();
     // Auto-hide paper history once running live, so win/loss stats reflect real trades only.
     // ?includePaper=1 overrides this to inspect the full history including paper trades.
-    const modeFilter = req.query.includePaper === '1' ? {} : { isPaper: settingsPreview.paperTrading };
+    const modeFilter = viewFilter(req, settingsPreview.paperTrading);
     const [settings, wallet, open, closed, signals24h, statusGroups, whaleGroups, activeWhales, spent24h, queueCounts] = await Promise.all([
       Promise.resolve(settingsPreview),
       walletSnapshot(),
@@ -125,15 +138,39 @@ export function createServer() {
     const openCostUsd = open.reduce((a, p) => a + (p.costUsd || p.entryAmount * p.entryPrice), 0);
     const exitReasons: Record<string, number> = {};
     for (const p of closed) exitReasons[p.exitReason || 'unknown'] = (exitReasons[p.exitReason || 'unknown'] || 0) + 1;
+    // In paper mode the real wallet is not what the run is being judged on, and showing its
+    // balance next to simulated PnL invites reading one as the other. Report simulated equity
+    // instead — starting cash plus realised PnL plus what the open paper positions are worth —
+    // and flag it so the cockpit can label it rather than passing it off as the real balance.
+    const shownWallet = settings.paperTrading
+      ? (() => {
+          const equityUsd = settings.paperStartBalanceUsd + realizedPnlUsd + (openValueUsd - openCostUsd);
+          return {
+            address: wallet.address,
+            simulated: true,
+            startUsd: settings.paperStartBalanceUsd,
+            sol: wallet.solPrice > 0 ? equityUsd / wallet.solPrice : null,
+            usd: equityUsd,
+            idr: wallet.idrRate ? equityUsd * wallet.idrRate : null,
+            idrRate: wallet.idrRate,
+            solPrice: wallet.solPrice,
+          };
+        })()
+      : { ...wallet, simulated: false, startUsd: null };
+
     const recentStopLosses = await prisma.position.count({
-      where: { exitReason: 'stop_loss', closedAt: { gte: new Date(Date.now() - env.CIRCUIT_BREAKER_WINDOW_MINUTES * 60000) } },
+      where: {
+        exitReason: 'stop_loss',
+        archived: false,
+        closedAt: { gte: new Date(Date.now() - env.CIRCUIT_BREAKER_WINDOW_MINUTES * 60000) },
+      },
     });
 
     res.json({
       now: Date.now(),
       uptimeSec: Math.round(process.uptime()),
       settings,
-      wallet,
+      wallet: shownWallet,
       rpc: solanaRpcUrl.includes('helius') ? 'helius' : solanaRpcUrl.includes('api.mainnet-beta') ? 'public' : 'custom',
       engines: systemStatus,
       queue: queueCounts,
@@ -164,7 +201,7 @@ export function createServer() {
 
   app.get('/api/equity', h(async (req, res) => {
     const settings = await settingsService.getPublicSettings();
-    const modeFilter = req.query.includePaper === '1' ? {} : { isPaper: settings.paperTrading };
+    const modeFilter = viewFilter(req, settings.paperTrading);
     const closed = await prisma.position.findMany({ where: { status: 'closed', ...modeFilter }, orderBy: { closedAt: 'asc' } });
     let cum = 0;
     res.json(
@@ -179,7 +216,7 @@ export function createServer() {
   // Score vs actual outcome — for tuning the threshold (Batch 8)
   app.get('/api/performance', h(async (req, res) => {
     const settings = await settingsService.getPublicSettings();
-    const modeFilter = req.query.includePaper === '1' ? {} : { isPaper: settings.paperTrading };
+    const modeFilter = viewFilter(req, settings.paperTrading);
     const closed = await prisma.position.findMany({
       where: { status: 'closed', signalId: { not: null }, ...modeFilter },
       include: { signal: { include: { score: true } } },
@@ -302,13 +339,20 @@ export function createServer() {
     res.json(await prisma.signal.findMany({ orderBy: { createdAt: 'desc' }, take: 60, include: { score: true } }));
   }));
 
-  app.get('/api/positions', h(async (_req, res) => {
-    res.json(await prisma.position.findMany({ orderBy: { openedAt: 'desc' }, take: 60, include: { trades: true } }));
+  app.get('/api/positions', h(async (req, res) => {
+    res.json(
+      await prisma.position.findMany({
+        where: req.query.includeArchived === '1' ? {} : { archived: false },
+        orderBy: { openedAt: 'desc' },
+        take: 60,
+        include: { trades: true },
+      })
+    );
   }));
 
   app.get('/api/trades', h(async (req, res) => {
     const settings = await settingsService.getPublicSettings();
-    const modeFilter = req.query.includePaper === '1' ? {} : { isPaper: settings.paperTrading };
+    const modeFilter = viewFilter(req, settings.paperTrading);
     res.json(await prisma.trade.findMany({ where: modeFilter, orderBy: { createdAt: 'desc' }, take: 60 }));
   }));
 
