@@ -65,6 +65,11 @@ model Position {
   costSol               Float                  @default(0) @map("cost_sol")
   proceedsUsd           Float?                 @map("proceeds_usd")
   whaleWallet           String?                @map("whale_wallet")
+  /// What the source whale got out at, captured when their exit was detected. Paired with
+  /// Signal.whaleEntryPrice this gives the whale's own round trip to compare ours against.
+  whaleExitPrice        Float?                 @map("whale_exit_price")
+  whaleExitAmount       Float?                 @map("whale_exit_amount")
+  whaleExitAt           DateTime?              @map("whale_exit_at")
   isPaper               Boolean                @default(true) @map("is_paper")
   peakPrice             Float                  @default(0) @map("peak_price")
   trailingActive        Boolean                @default(false) @map("trailing_active")

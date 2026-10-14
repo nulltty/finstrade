@@ -105,7 +105,7 @@ export class MultiWalletScanner {
       });
     }
 
-    const exits = settings.copySellEnabled ? await this.handleWhaleSells(wallet, tx) : 0;
+    const exits = settings.copySellEnabled ? await this.handleWhaleSells(wallet, tx, solPrice) : 0;
     return { signals, exits };
   }
 
@@ -138,16 +138,46 @@ export class MultiWalletScanner {
   }
 
   /** Copy-sell: the whale that gave us the entry is dumping the same token */
-  private async handleWhaleSells(wallet: string, tx: NormalizedTx): Promise<number> {
+  private async handleWhaleSells(wallet: string, tx: NormalizedTx, solPrice: number): Promise<number> {
     const sold = Object.entries(tx.tokenDeltas).filter(([, v]) => v.delta < 0).map(([mint]) => mint);
     if (sold.length === 0) return 0;
 
     const positions = await prisma.position.findMany({
       where: { status: 'open', whaleWallet: wallet, tokenAddress: { in: sold } },
     });
+    // What the whale actually realised on this tx. Only meaningful when they took SOL or
+    // stables out — a memecoin-to-memecoin swap leaves no quote leg to price against, and a
+    // fabricated number here would corrupt the very comparison this field exists for.
+    const quoteSol = tx.solDelta + (solPrice > 0 ? tx.stableDelta / solPrice : 0);
+    const proceedsUsd = quoteSol > 0 ? quoteSol * solPrice : null;
+
     for (const pos of positions) {
-      logger.warn({ positionId: pos.id, wallet, token: pos.tokenAddress }, 'Whale exited token — copy-selling');
-      await audit('WHALE_EXIT_DETECTED', `Source whale sold ${pos.tokenSymbol}; copy-selling`, { positionId: pos.id, wallet, tx: tx.signature });
+      const tokensSold = Math.abs(tx.tokenDeltas[pos.tokenAddress]?.delta ?? 0);
+      const exitPrice = proceedsUsd !== null && tokensSold > 0 ? proceedsUsd / tokensSold : null;
+
+      logger.warn(
+        { positionId: pos.id, wallet, token: pos.tokenAddress, whaleExitPrice: exitPrice, tokensSold },
+        'Whale exited token — copy-selling'
+      );
+      // Keep the first exit we saw: that is the one we acted on. A whale selling in tranches
+      // would otherwise overwrite the decision point with a later, irrelevant price.
+      if (pos.whaleExitAt === null) {
+        await prisma.position.update({
+          where: { id: pos.id },
+          data: {
+            whaleExitPrice: exitPrice,
+            whaleExitAmount: tokensSold > 0 ? tokensSold : null,
+            whaleExitAt: new Date(tx.timestamp || Date.now()),
+          },
+        });
+      }
+      await audit('WHALE_EXIT_DETECTED', `Source whale sold ${pos.tokenSymbol}; copy-selling`, {
+        positionId: pos.id,
+        wallet,
+        tx: tx.signature,
+        whaleExitPrice: exitPrice,
+        tokensSold,
+      });
       const { tradeExecutor } = await import('./executor.js');
       await tradeExecutor.executeSell(pos.id, 'whale_exit');
     }
