@@ -1,7 +1,7 @@
 import { prisma } from '../db/prisma.js';
 import { whaleWatcherService, WhaleSwapEvent } from './watcher.js';
 import { getRecentWalletTxs, getLatestSignature, getSolPriceUsd, NormalizedTx } from './solana.js';
-import { settingsService } from './settings.js';
+import { settingsService, BotSettingsData } from './settings.js';
 import { audit } from './audit.js';
 import { logger } from './logger.js';
 
@@ -56,16 +56,9 @@ export class MultiWalletScanner {
 
           // Oldest first so buy → sell sequences are handled in order
           for (const tx of [...txs].reverse()) {
-            if (tx.failed) continue;
-            for (const ev of this.extractBuys(wallet.address, tx, solPrice)) {
-              if ((ev.amountUsd || 0) < settings.minWhaleBuyUsd) continue;
-              const res = await whaleWatcherService.processEvent(ev);
-              if (!res.skipped) {
-                signalsFound++;
-                await prisma.watchedWallet.update({ where: { id: wallet.id }, data: { signalsTriggered: { increment: 1 } } });
-              }
-            }
-            if (settings.copySellEnabled) whaleExits += await this.handleWhaleSells(wallet.address, tx);
+            const r = await this.handleWhaleTx(wallet.address, tx, solPrice, settings);
+            signalsFound += r.signals;
+            whaleExits += r.exits;
           }
 
           await prisma.watchedWallet.update({
@@ -82,6 +75,38 @@ export class MultiWalletScanner {
 
     logger.info({ scannedCount, signalsFound, whaleExits }, 'Multi-wallet scanner pass completed');
     return { scannedCount, signalsFound, whaleExits };
+  }
+
+  /**
+   * Process one parsed whale tx: buys become signals, sells of a token we copied trigger a
+   * copy-sell. Shared by the polling scanner and the Helius webhook push so a pushed tx and
+   * a polled tx behave identically — the webhook is just the faster way to arrive here.
+   */
+  async handleWhaleTx(
+    wallet: string,
+    tx: NormalizedTx,
+    solPrice: number,
+    settings: BotSettingsData,
+    rawTx?: Record<string, any>
+  ): Promise<{ signals: number; exits: number }> {
+    if (tx.failed) return { signals: 0, exits: 0 };
+
+    let signals = 0;
+    for (const ev of this.extractBuys(wallet, tx, solPrice)) {
+      if ((ev.amountUsd || 0) < settings.minWhaleBuyUsd) continue;
+      if (rawTx) ev.rawTx = rawTx;
+      const res = await whaleWatcherService.processEvent(ev);
+      if (!res.skipped) signals++;
+    }
+    if (signals > 0) {
+      await prisma.watchedWallet.updateMany({
+        where: { address: wallet, chain: 'solana' },
+        data: { signalsTriggered: { increment: signals } },
+      });
+    }
+
+    const exits = settings.copySellEnabled ? await this.handleWhaleSells(wallet, tx) : 0;
+    return { signals, exits };
   }
 
   /** A buy = wallet received a non-base token while spending SOL/stables */

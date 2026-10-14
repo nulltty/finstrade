@@ -46,6 +46,19 @@ export type ExitReason =
 const FEE_BUFFER_SOL = 0.01; // ATA rent + priority fee headroom per swap
 const MAX_SWAP_ATTEMPTS = 3; // a blockhash-expired swap is provably dead — safe to retry with a fresh one
 
+/**
+ * Live buys are serialised. Each one sizes itself against the wallet's SOL balance, so two
+ * running concurrently would both claim the same lamports and the loser's transfer fails
+ * on-chain with "insufficient lamports". The lock makes every buy see the balance the
+ * previous one actually left behind.
+ */
+let liveBuyLock: Promise<unknown> = Promise.resolve();
+function withLiveBuyLock<T>(fn: () => Promise<T>): Promise<T> {
+  const run = liveBuyLock.then(fn, fn);
+  liveBuyLock = run.catch(() => undefined);
+  return run;
+}
+
 /** Pulls the signature out of an AMBIGUOUS_SWAP error raised by executeJupiterSwap, if any */
 function extractAmbiguousSig(err: any): string | null {
   const m = /AMBIGUOUS_SWAP (\S+):/.exec(err?.message || '');
@@ -127,25 +140,31 @@ export class TradeExecutor {
 
     try {
       const isPaper = await this.isPaperFor(settings, signal.txHash);
-      const size = await this.resolvePositionSizeUsd(settings, isPaper);
-      if (size.error) throw new Error(size.error);
-
       const rawMetrics = (signal.rawMetrics as any) || {};
       const solPrice = await getSolPriceUsd();
       let entryPrice: number;
       let tokenAmount: number;
       let rawAmount: string | null = null;
       let decimals: number | null = null;
-      let costSol = solPrice > 0 ? size.usd / solPrice : 0;
-      let costUsd = size.usd;
+      let costSol: number;
+      let costUsd: number;
       let txHash: string;
 
       if (isPaper) {
+        const size = await this.resolvePositionSizeUsd(settings, true);
+        if (size.error) throw new Error(size.error);
         entryPrice = rawMetrics.priceUsd > 0 ? rawMetrics.priceUsd : 0.001;
         tokenAmount = size.usd / entryPrice;
+        costUsd = size.usd;
+        costSol = solPrice > 0 ? size.usd / solPrice : 0;
         txHash = `paper_buy_${crypto.randomBytes(16).toString('hex')}`;
       } else {
-        const live = await this.liveBuy(signal.tokenAddress, size.usd, settings);
+        // Size and swap under one lock so the balance read can't go stale in between
+        const live = await withLiveBuyLock(async () => {
+          const size = await this.resolvePositionSizeUsd(settings, false);
+          if (size.error) throw new Error(size.error);
+          return this.liveBuy(signal.tokenAddress, size.usd, settings);
+        });
         ({ txHash, tokenAmount, rawAmount, decimals, costSol } = live);
         costUsd = costSol * solPrice;
         entryPrice = costUsd / tokenAmount;

@@ -93,38 +93,6 @@ export class WhaleWatcherService {
     if (symbol && blueChipTokens.has(symbol.toUpperCase())) return true;
     return false;
   }
-
-  /**
-   * Parse Helius enhanced transaction webhook payload
-   */
-  parseHeliusWebhook(payload: any[]): WhaleSwapEvent[] {
-    const events: WhaleSwapEvent[] = [];
-
-    for (const tx of payload) {
-      if (!tx || tx.type !== 'SWAP') continue;
-      const txHash = tx.signature;
-      const wallet = tx.feePayer;
-
-      // Extract swap token outputs
-      if (tx.tokenTransfers && Array.isArray(tx.tokenTransfers)) {
-        for (const transfer of tx.tokenTransfers) {
-          if (transfer.toUserAccount === wallet && transfer.mint) {
-            events.push({
-              wallet,
-              chain: 'solana',
-              tokenAddress: transfer.mint,
-              txHash,
-              amountUsd: transfer.tokenAmount || 0,
-              timestamp: tx.timestamp ? tx.timestamp * 1000 : Date.now(),
-              rawTx: tx,
-            });
-          }
-        }
-      }
-    }
-
-    return events;
-  }
 }
 
 export const whaleWatcherService = new WhaleWatcherService();

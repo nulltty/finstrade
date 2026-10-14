@@ -11,7 +11,8 @@ import { telegramBot } from '../bot/telegram.js';
 import { settingsService } from '../services/settings.js';
 import { systemStatus } from '../services/status.js';
 import { computeReadiness, buildReadinessReport } from '../services/readiness.js';
-import { getTradingKeypair, getSolBalance, getSolPriceUsd, getUsdToIdrRate } from '../services/solana.js';
+import { getTradingKeypair, getSolBalance, getSolPriceUsd, getUsdToIdrRate, normalizeHeliusTx } from '../services/solana.js';
+import { multiWalletScanner } from '../services/scanner.js';
 import { getApiHealthSummary } from '../services/apiHealth.js';
 import { createSessionToken, verifySessionToken, parseCookies, SESSION_COOKIE_NAME } from '../services/session.js';
 import { multiWalletScannerQueue, signalQueue, whaleDiscoveryQueue } from '../workers/queue.js';
@@ -232,10 +233,25 @@ export function createServer() {
   // ── Webhooks ────────────────────────────────────────────────────────────
   app.post('/api/webhook/helius', h(async (req, res) => {
     if (req.headers.authorization !== env.WEBHOOK_SECRET) return res.status(401).json({ error: 'unauthorized' });
-    const payload = req.body;
-    const events = whaleWatcherService.parseHeliusWebhook(Array.isArray(payload) ? payload : [payload]);
-    for (const event of events) await whaleWatcherService.processEvent(event);
-    res.json({ success: true, processed: events.length });
+    const txs = Array.isArray(req.body) ? req.body : [req.body];
+    const solPrice = await getSolPriceUsd();
+    const settings = await settingsService.getSettings();
+
+    let signals = 0;
+    let exits = 0;
+    for (const tx of txs) {
+      if (!tx?.signature || !tx?.feePayer) continue;
+      const r = await multiWalletScanner.handleWhaleTx(
+        tx.feePayer,
+        normalizeHeliusTx(tx, tx.feePayer),
+        solPrice,
+        settings,
+        tx
+      );
+      signals += r.signals;
+      exits += r.exits;
+    }
+    res.json({ success: true, received: txs.length, signals, exits });
   }));
 
   // ── Whale wallets ───────────────────────────────────────────────────────
