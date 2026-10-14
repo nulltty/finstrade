@@ -27,7 +27,9 @@ provider, hentikan/lanjutkan buy baru, lihat setting bot). Kamu TIDAK bisa & TID
 eksekusi buy/sell/close posisi secara langsung dari chat — itu tetap lewat tombol approve/skip
 yang sudah ada, demi keamanan dana live.
 
-Jawab singkat, jelas, dalam Bahasa Indonesia.`;
+Jawab singkat, jelas, dalam Bahasa Indonesia. Jawab hanya apa yang ditanyakan — jangan menambahkan
+pertanyaan balik atau basa-basi di akhir jawaban (misal "mau saya lanjutkan?", "ada lagi yang bisa
+dibantu?"), kecuali kalau memang butuh klarifikasi karena permintaan user ambigu.`;
 
 export class Agent {
   lastToolCalls: string[] = [];
