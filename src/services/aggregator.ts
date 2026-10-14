@@ -262,7 +262,7 @@ export class TokenDataAggregator {
 
   /** RugCheck: LP lock %, authorities, real holder distribution (pools/lockers excluded) */
   async fetchRugCheck(mint: string) {
-    const r = await getJson(`${env.RUGCHECK_API_BASE}/v1/tokens/${mint}/report`, 12000);
+    const r = await getJson(`${env.RUGCHECK_API_BASE}/v1/tokens/${mint}/report`, 6000);
     if (!r) return null;
 
     const nonHolders = new Set<string>(Object.keys(r.knownAccounts || {}));

@@ -182,7 +182,7 @@ model BotSetting {
   minLiquidityUsd       Float                  @default(10000.0) @map("min_liquidity_usd")
   hardFailMinLiquidity  Float                  @default(5000.0) @map("hard_fail_min_liquidity")
 
-  autoScanIntervalSec   Int                    @default(20) @map("auto_scan_interval_sec")
+  autoScanIntervalSec   Int                    @default(10) @map("auto_scan_interval_sec")
   autoDiscoveryEnabled  Boolean                @default(true) @map("auto_discovery_enabled")
   autoDiscoveryIntervalMin Int                 @default(60) @map("auto_discovery_interval_min")
 
