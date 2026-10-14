@@ -101,6 +101,7 @@ export class TokenDataAggregator {
     const honeypotReasons: string[] = [...(goplus?.honeypotReasons || [])];
     if (rug?.freezeAuthority) honeypotReasons.push('Freeze authority active (holders can be frozen)');
     if (rug?.rugged) honeypotReasons.push('RugCheck marks token as rugged');
+    if (route && route.ok === false) honeypotReasons.push('No buy route on Jupiter (insufficient liquidity/routing)');
     if (route && route.sellRouteOk === false) honeypotReasons.push('No sell route on Jupiter (cannot exit)');
 
     const settings = await settingsService.getSettings();
