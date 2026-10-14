@@ -62,7 +62,10 @@ const r2 = (n: number) => Math.round(n * 100) / 100;
 
 export async function loadClosedTrades(): Promise<{ trades: ReadinessTrade[]; haircutPct: number; haircutSource: string }> {
   const positions = await prisma.position.findMany({
-    where: { status: 'closed' },
+    // Archived runs are excluded for the same reason the cockpit hides them: they came from
+    // a fill model that no longer describes how the bot behaves, so counting them here would
+    // judge today's readiness on yesterday's arithmetic.
+    where: { status: 'closed', archived: false },
     include: { signal: { include: { score: true } } },
     orderBy: { closedAt: 'asc' },
   });
@@ -161,14 +164,33 @@ export async function computeReadiness(opts: { uptimeSec?: number | null } = {})
 
   const since7 = new Date(Date.now() - 7 * 86400000);
   const since14 = new Date(Date.now() - 14 * 86400000);
-  const [sellFailures, breakerLogs, qualifiedWhales] = await Promise.all([
-    prisma.auditLog.count({ where: { action: 'SELL_FAILED', createdAt: { gte: since7 } } }),
+  const [failedSellLogs, breakerLogs, qualifiedWhales] = await Promise.all([
+    prisma.auditLog.findMany({ where: { action: 'SELL_FAILED', createdAt: { gte: since7 } }, select: { payload: true } }),
     prisma.auditLog.findMany({ where: { action: 'CIRCUIT_BREAKER_TRIPPED', createdAt: { gte: since14 } }, select: { createdAt: true } }),
     // Hand-picked wallets count as usable too: they are deliberately monitored, just not
     // vetted against the automatic thresholds
     prisma.watchedWallet.count({ where: { profileStatus: { in: ['qualified', 'manual'] }, isActive: true } }),
   ]);
   const breakerDays = new Set(breakerLogs.map((l) => l.createdAt.toISOString().slice(0, 10))).size;
+
+  // This report judges the paper run, so its failure count has to as well. A live session's
+  // sell failures — or an archived run's — say nothing about whether this paper evidence is
+  // sound. Counted per event, not per position, so a position that failed repeatedly still
+  // shows the repetition.
+  const failedPositionIds = failedSellLogs
+    .map((l) => (l.payload as any)?.positionId)
+    .filter((v): v is string => typeof v === 'string');
+  const paperFailed = new Set(
+    failedPositionIds.length
+      ? (
+          await prisma.position.findMany({
+            where: { id: { in: failedPositionIds }, isPaper: true, archived: false },
+            select: { id: true },
+          })
+        ).map((p) => p.id)
+      : []
+  );
+  const sellFailures = failedPositionIds.filter((id) => paperFailed.has(id)).length;
 
   const stopLosses = paper.filter((t) => t.exitReason === 'stop_loss').length;
   const profitExits = paper.filter((t) => t.adjPnlUsd > 0 && t.exitReason !== 'manual').length;
