@@ -31,6 +31,8 @@ const envSchema = z.object({
   ASSISTANT_ALLOWED_USER_ID: z.string().default(''),
 
   HELIUS_API_KEY: z.string().optional().default(''),
+  HELIUS_WEBHOOK_ID: z.string().optional().default(''),
+  HELIUS_WEBHOOK_URL: z.string().optional().default(''),
   ALCHEMY_API_KEY: z.string().optional().default(''),
   WATCHED_WALLETS: z.string().default(''),
 

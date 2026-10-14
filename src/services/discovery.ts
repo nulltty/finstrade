@@ -5,6 +5,7 @@ import { rpc } from './solana.js';
 import { audit } from './audit.js';
 import { logger } from './logger.js';
 import { recordApiEvent, providerFromUrl, isTimeoutError } from './apiHealth.js';
+import { syncWebhookAddresses } from './heliusWebhook.js';
 
 export interface DiscoveryResult {
   winnersScanned: number;
@@ -299,6 +300,7 @@ export class WhaleDiscoveryService {
       result as any
     );
     logger.info(result, 'Whale discovery cycle completed');
+    await syncWebhookAddresses();
     return result;
   }
 
@@ -310,7 +312,7 @@ export class WhaleDiscoveryService {
   }
 
   async addWallet(data: { address: string; chain: string; label?: string; tags?: string[] }) {
-    return prisma.watchedWallet.upsert({
+    const wallet = await prisma.watchedWallet.upsert({
       where: { address: data.address },
       create: {
         address: data.address,
@@ -327,16 +329,22 @@ export class WhaleDiscoveryService {
         discoveredVia: 'manual_dashboard',
       },
     });
+    await syncWebhookAddresses();
+    return wallet;
   }
 
   async toggleWallet(id: string) {
     const wallet = await prisma.watchedWallet.findUnique({ where: { id } });
     if (!wallet) throw new Error('Wallet not found');
-    return prisma.watchedWallet.update({ where: { id }, data: { isActive: !wallet.isActive } });
+    const updated = await prisma.watchedWallet.update({ where: { id }, data: { isActive: !wallet.isActive } });
+    await syncWebhookAddresses();
+    return updated;
   }
 
   async deleteWallet(id: string) {
-    return prisma.watchedWallet.delete({ where: { id } });
+    const deleted = await prisma.watchedWallet.delete({ where: { id } });
+    await syncWebhookAddresses();
+    return deleted;
   }
 }
 
