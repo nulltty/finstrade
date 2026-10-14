@@ -103,7 +103,11 @@ export class TradeExecutor {
     if (dup) return 'already holding this token';
 
     const since = new Date(Date.now() - 24 * 3600 * 1000);
-    const spent = await prisma.trade.aggregate({ _sum: { totalUsd: true }, where: { side: 'BUY', createdAt: { gte: since } } });
+    // Paper fills spend nothing, so they must not consume a cap that exists to bound real money
+    const spent = await prisma.trade.aggregate({
+      _sum: { totalUsd: true },
+      where: { side: 'BUY', isPaper: false, createdAt: { gte: since } },
+    });
     if ((spent._sum.totalUsd || 0) + settings.tradeAmountUsd > settings.maxDailySpendUsd) {
       return `daily spend cap reached ($${(spent._sum.totalUsd || 0).toFixed(0)} / $${settings.maxDailySpendUsd})`;
     }
