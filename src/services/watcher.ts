@@ -12,6 +12,8 @@ export interface WhaleSwapEvent {
   txHash: string;
   amountUsd?: number;
   whaleSolSpent?: number;
+  whaleEntryPrice?: number;
+  whaleEntryAmount?: number;
   timestamp?: number;
   rawTx?: Record<string, any>;
 }
@@ -21,7 +23,7 @@ export class WhaleWatcherService {
    * Filter and process a whale swap event
    */
   async processEvent(event: WhaleSwapEvent) {
-    const { wallet, chain, tokenAddress, tokenSymbol, tokenName, txHash, amountUsd, whaleSolSpent, timestamp, rawTx } = event;
+    const { wallet, chain, tokenAddress, tokenSymbol, tokenName, txHash, amountUsd, whaleSolSpent, whaleEntryPrice, whaleEntryAmount, timestamp, rawTx } = event;
 
     // Check if token is blue chip or stablecoin
     if (this.isBlueChipOrStable(tokenAddress, tokenSymbol)) {
@@ -70,6 +72,8 @@ export class WhaleWatcherService {
         txHash,
         amountUsd: amountUsd || 0,
         whaleSolSpent: whaleSolSpent ?? null,
+        whaleEntryPrice: whaleEntryPrice ?? null,
+        whaleEntryAmount: whaleEntryAmount ?? null,
         whaleTxAt: new Date(timestamp || Date.now()),
         status: 'detected',
         rawTx: rawTx || {},

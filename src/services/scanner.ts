@@ -91,7 +91,11 @@ export class MultiWalletScanner {
 
     const received = Object.entries(tx.tokenDeltas).filter(([, v]) => v.delta > 0);
     if (received.length === 0) return [];
-    const [mint] = received.sort((a, b) => b[1].delta - a[1].delta)[0];
+    const [mint, info] = received.sort((a, b) => b[1].delta - a[1].delta)[0];
+
+    const amountUsd = -quoteSol * solPrice;
+    const whaleEntryAmount = info.delta;
+    const whaleEntryPrice = whaleEntryAmount > 0 ? amountUsd / whaleEntryAmount : undefined;
 
     return [
       {
@@ -99,8 +103,10 @@ export class MultiWalletScanner {
         chain: 'solana',
         tokenAddress: mint,
         txHash: tx.signature,
-        amountUsd: -quoteSol * solPrice,
+        amountUsd,
         whaleSolSpent: -quoteSol,
+        whaleEntryAmount,
+        whaleEntryPrice,
         timestamp: tx.timestamp,
       },
     ];

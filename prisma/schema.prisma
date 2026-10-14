@@ -17,6 +17,8 @@ model Signal {
   txHash                String                 @unique @map("tx_hash")
   amountUsd             Float?                 @map("amount_usd")
   whaleSolSpent         Float?                 @map("whale_sol_spent")
+  whaleEntryPrice       Float?                 @map("whale_entry_price")
+  whaleEntryAmount      Float?                 @map("whale_entry_amount")
   whaleTxAt             DateTime?              @map("whale_tx_at")
   decision              String?                // auto_buy, approval_requested, rejected:<reason>
   status                String                 @default("detected") // detected, aggregated, scored, pending_approval, approved, skipped, timeout_expired, executing_buy, bought, failed
