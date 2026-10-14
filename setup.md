@@ -111,7 +111,7 @@ Isi dengan Telegram user ID kamu sendiri (lihat cara ambil user ID di bagian 3b)
 ### c. (Opsional) Sandbox Docker untuk shell/browse web
 Kalau ingin Fins bisa jalankan command shell atau browsing web di sandbox terisolasi:
 ```bash
-docker build -t finsassiant-sandbox -f assistant/docker/Dockerfile.sandbox assistant/docker
+docker build -t finsassiant-sandbox -f docker/sandbox/Dockerfile.sandbox docker/sandbox
 ```
 Sandbox jalan dengan `--cap-drop=ALL --security-opt=no-new-privileges`, tanpa akses filesystem host.
 
