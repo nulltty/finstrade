@@ -1,4 +1,21 @@
-import { describe, it, expect, beforeAll, afterAll } from 'vitest';
+import { describe, it, expect, beforeAll, afterAll, vi } from 'vitest';
+
+// Paper fills are priced from a real Jupiter quote in production. Stub the quote here so this
+// test asserts the fill accounting rather than whether one memecoin still has liquidity today.
+vi.mock('../services/solana.js', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('../services/solana.js')>();
+  const WSOL = 'So11111111111111111111111111111111111111112';
+  return {
+    ...actual,
+    getSolPriceUsd: async () => 100,
+    getMintDecimals: async () => 9,
+    getJupiterQuote: async (inputMint: string) =>
+      (inputMint === WSOL
+        ? { outAmount: '11764705882', priceImpactPct: '0.004' } // 0.1 SOL buys ~11.76 tokens
+        : { outAmount: '76000000', priceImpactPct: '0.004' }) as any, // exit at a loss: 0.076 SOL
+  };
+});
+
 import { whaleWatcherService } from '../services/watcher.js';
 import { circuitBreaker } from '../services/circuitBreaker.js';
 import { tradeExecutor } from '../services/executor.js';

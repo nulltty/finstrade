@@ -61,7 +61,7 @@ export class PositionMonitorService {
     // quotes are free reads, so check periodically that a route still exists and act before the
     // stop loss fires into a door that already closed. Two consecutive misses are required so a
     // single API blip can never liquidate the book.
-    if (!pos.isPaper && pos.entryRawAmount && Date.now() - (this.routeCheckedAt.get(pos.id) ?? 0) > ROUTE_CHECK_INTERVAL_MS) {
+    if (pos.entryRawAmount && Date.now() - (this.routeCheckedAt.get(pos.id) ?? 0) > ROUTE_CHECK_INTERVAL_MS) {
       this.routeCheckedAt.set(pos.id, Date.now());
       const exitSlippage = Math.min(5000, settings.slippageBps * 2);
       const quote = await getJupiterQuote(pos.tokenAddress, WSOL_MINT, BigInt(pos.entryRawAmount), exitSlippage);

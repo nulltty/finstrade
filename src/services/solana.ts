@@ -138,6 +138,19 @@ export async function getSolBalance(address: string): Promise<number | null> {
   return res ? res.value / LAMPORTS_PER_SOL : null;
 }
 
+const mintDecimals = new Map<string, number>();
+
+/** Decimals for a mint, cached for the process — converts Jupiter's raw amounts to UI units */
+export async function getMintDecimals(mint: string): Promise<number | null> {
+  const hit = mintDecimals.get(mint);
+  if (hit !== undefined) return hit;
+  const res = await rpc<any>('getTokenSupply', [mint, { commitment: 'confirmed' }]);
+  const d = res?.value?.decimals;
+  if (typeof d !== 'number') return null;
+  mintDecimals.set(mint, d);
+  return d;
+}
+
 const TOKEN_PROGRAMS = [
   'TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA', // SPL Token
   'TokenzQdBNbLqP5VEhdkAS6EPFLC1PHnBqCXEpPxuEb', // Token-2022

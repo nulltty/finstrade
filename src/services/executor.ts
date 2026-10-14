@@ -8,6 +8,7 @@ import {
   getSolBalance,
   getSolPriceUsd,
   getTokenBalance,
+  getMintDecimals,
   getJupiterQuote,
   executeJupiterSwap,
   fetchNormalizedTx,
@@ -54,6 +55,14 @@ const MAX_SWAP_ATTEMPTS = 3; // a blockhash-expired swap is provably dead — sa
  * partially out instead of trapped at 100% while the price keeps falling.
  */
 const SELL_SIZE_FALLBACKS = [1, 0.5, 0.25, 0.1];
+
+const BASE_FEE_SOL = 0.000005; // signature fee
+const ATA_RENT_SOL = 0.00203928; // rent for the token account a first buy has to create
+
+/** Per-swap cost a paper fill must carry so its PnL is comparable to a live one */
+function swapCostSol(settings: BotSettingsData, opensAta: boolean) {
+  return settings.maxPriorityFee + BASE_FEE_SOL + (opensAta ? ATA_RENT_SOL : 0);
+}
 
 /**
  * Live buys are serialised. Each one sizes itself against the wallet's SOL balance, so two
@@ -149,7 +158,6 @@ export class TradeExecutor {
 
     try {
       const isPaper = await this.isPaperFor(settings, signal.txHash);
-      const rawMetrics = (signal.rawMetrics as any) || {};
       const solPrice = await getSolPriceUsd();
       let entryPrice: number;
       let tokenAmount: number;
@@ -162,11 +170,9 @@ export class TradeExecutor {
       if (isPaper) {
         const size = await this.resolvePositionSizeUsd(settings, true);
         if (size.error) throw new Error(size.error);
-        entryPrice = rawMetrics.priceUsd > 0 ? rawMetrics.priceUsd : 0.001;
-        tokenAmount = size.usd / entryPrice;
-        costUsd = size.usd;
-        costSol = solPrice > 0 ? size.usd / solPrice : 0;
-        txHash = `paper_buy_${crypto.randomBytes(16).toString('hex')}`;
+        if (solPrice <= 0) throw new Error('SOL price unavailable');
+        const paper = await this.paperBuy(signal.tokenAddress, size.usd, settings, solPrice);
+        ({ txHash, tokenAmount, rawAmount, decimals, costSol, costUsd, entryPrice } = paper);
       } else {
         // Size and swap under one lock so the balance read can't go stale in between
         const live = await withLiveBuyLock(async () => {
@@ -264,17 +270,17 @@ export class TradeExecutor {
       let tokensSold = position.entryAmount;
       let remainingRaw = 0n;
 
-      if (position.isPaper) {
-        txHash = `paper_sell_${crypto.randomBytes(16).toString('hex')}`;
-      } else {
-        const live = await this.liveSell(position.tokenAddress, settings);
-        txHash = live.txHash;
-        solAmount = live.solReceived;
-        proceedsUsd = live.solReceived * (await getSolPriceUsd());
-        tokensSold = live.tokensSold;
-        remainingRaw = live.remainingRaw;
-        if (live.tokensSold > 0) exitPrice = proceedsUsd / live.tokensSold;
-      }
+      // Paper and live take the same quote-driven path; only the signed swap differs
+      const fill = position.isPaper
+        ? await this.paperSell(position, settings)
+        : await this.liveSell(position.tokenAddress, settings);
+
+      txHash = fill.txHash;
+      solAmount = fill.solReceived;
+      proceedsUsd = fill.solReceived * (await getSolPriceUsd());
+      tokensSold = fill.tokensSold;
+      remainingRaw = fill.remainingRaw;
+      if (fill.tokensSold > 0) exitPrice = proceedsUsd / fill.tokensSold;
 
       const pnlPercent = position.costUsd > 0
         ? ((proceedsUsd - position.costUsd) / position.costUsd) * 100
@@ -363,6 +369,64 @@ export class TradeExecutor {
 
       return { success: false, error: err?.message };
     }
+  }
+
+  /**
+   * A paper buy priced off a real Jupiter quote: the route, the price impact and the fees are
+   * the ones a live order would have met, and it refuses on the same gates. Only the signed
+   * transaction is skipped, so paper results stay comparable to live instead of flattering it.
+   */
+  private async paperBuy(mint: string, amountUsd: number, settings: BotSettingsData, solPrice: number) {
+    const lamports = BigInt(Math.floor((amountUsd / solPrice) * LAMPORTS_PER_SOL));
+    const quote = await getJupiterQuote(WSOL_MINT, mint, lamports, settings.slippageBps);
+    if (!quote) throw new Error('No Jupiter route for buy');
+    const impact = Number(quote.priceImpactPct || 0) * 100;
+    if (impact > settings.maxPriceImpactPct) throw new Error(`Price impact ${impact.toFixed(1)}% exceeds limit`);
+
+    const decimals = await getMintDecimals(mint);
+    if (decimals === null) throw new Error('Cannot read token decimals');
+    const tokenAmount = Number(quote.outAmount) / 10 ** decimals;
+    if (!(tokenAmount > 0)) throw new Error('Quote returned no tokens');
+
+    const costSol = Number(lamports) / LAMPORTS_PER_SOL + swapCostSol(settings, true);
+    const costUsd = costSol * solPrice;
+    return {
+      txHash: `paper_buy_${crypto.randomBytes(16).toString('hex')}`,
+      tokenAmount,
+      rawAmount: String(quote.outAmount),
+      decimals,
+      costSol,
+      costUsd,
+      entryPrice: costUsd / tokenAmount,
+    };
+  }
+
+  /** Paper exit priced off a real quote, thin-pool size fallback and fees included */
+  private async paperSell(
+    position: { tokenAddress: string; entryAmount: number; entryRawAmount: string | null; tokenDecimals: number | null },
+    settings: BotSettingsData
+  ) {
+    const mint = position.tokenAddress;
+    const decimals = position.tokenDecimals ?? (await getMintDecimals(mint));
+    if (decimals === null) throw new Error('Cannot read token decimals');
+
+    const raw = position.entryRawAmount
+      ? BigInt(position.entryRawAmount)
+      : BigInt(Math.floor(position.entryAmount * 10 ** decimals));
+    if (raw <= 0n) throw new Error('Token balance is zero — nothing to sell');
+
+    const sized = await this.quoteSell(mint, raw, Math.min(5000, settings.slippageBps * 2));
+    if (!sized) {
+      throw new Error(`No Jupiter route for sell (tried ${SELL_SIZE_FALLBACKS.map((f) => f * 100 + '%').join('/')})`);
+    }
+    const { quote, amount } = sized;
+    const solReceived = Math.max(0, Number(quote.outAmount) / LAMPORTS_PER_SOL - swapCostSol(settings, false));
+    return {
+      txHash: `paper_sell_${crypto.randomBytes(16).toString('hex')}`,
+      solReceived,
+      tokensSold: Number(amount) / 10 ** decimals,
+      remainingRaw: raw - amount,
+    };
   }
 
   private async liveBuy(mint: string, amountUsd: number, settings: BotSettingsData) {
