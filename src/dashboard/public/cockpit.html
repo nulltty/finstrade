@@ -644,11 +644,26 @@ function renderPositions() {
   $('posTag').textContent = `${open.length} aktif · SL −${s.stopLossPercent}% · TP +${s.takeProfitPercent}%${s.autoTradeMode && s.trailingStopPercent ? ` · trailing armed @+${s.trailingArmPercent}% → ${s.trailingStopPercent}% dari peak` : ''}`;
   $('gaugeLegend').innerHTML = 'gauge: SL ◂ 0 ▸ TP · <span style="color:var(--violet)">▍</span> peak';
   if (!open.length) { $('positions').innerHTML = '<div class="empty">Tidak ada posisi terbuka. Bot menunggu sinyal whale yang lolos safety check.</div>'; return; }
+  // Whale profiles are already loaded for the radar, so the track record of the wallet behind
+  // each position is a local lookup rather than another request.
+  const whaleBy = new Map(state.wallets.map((w) => [w.address, w]));
   $('positions').innerHTML = `<table><thead><tr>
     <th>Token</th><th>Mode</th><th class="num">Cost</th><th class="num">Entry</th><th class="num">Now</th><th class="num">PnL</th><th>SL ◂ ▸ TP</th>
-    <th class="num">Peak</th><th>Exit plan</th><th>Whale</th><th class="num">Age</th><th></th></tr></thead><tbody>
+    <th class="num">Peak</th><th>Exit plan</th><th>Whale</th>
+    <th class="num" title="Rekam jejak whale ini dari profiling: PnL terealisasi (SOL) dan win rate">Whale PnL</th>
+    <th class="num">Age</th><th></th></tr></thead><tbody>
     ${open.map((p) => {
       const pnlUsd = p.entryAmount * p.currentPrice - (p.costUsd || p.entryAmount * p.entryPrice);
+      const w = whaleBy.get(p.whaleWallet);
+      const whalePnl = !w || !w.closedTrades
+        ? '<span class="muted">—</span>'
+        : `<span class="${cls(w.realizedPnlSol)}"><b>${(w.realizedPnlSol >= 0 ? '+' : '−') + Math.abs(w.realizedPnlSol).toFixed(2)}</b></span>` +
+          `<br><span style="font-size:11px" class="muted">${(w.winRate || 0).toFixed(0)}% WR</span>`;
+      const whaleTitle = !w
+        ? 'Wallet tidak ada di watchlist lagi'
+        : !w.closedTrades
+          ? 'Belum ada trade tertutup yang bisa diprofil'
+          : `${w.wins || 0}W/${w.losses || 0}L dari ${w.closedTrades} trade${w.balanceSol != null ? ` · saldo ${w.balanceSol.toFixed(2)} SOL` : ''}`;
       return `<tr>
       <td><a href="https://dexscreener.com/solana/${esc(p.tokenAddress)}" target="_blank" rel="noopener"><b>${esc(p.tokenSymbol)}</b></a></td>
       <td>${p.isPaper ? '<span class="badge warn">PAPER</span>' : '<span class="badge bad">LIVE</span>'}${p.status === 'closing' ? ' <span class="badge neon">SELLING…</span>' : ''}</td>
@@ -660,6 +675,7 @@ function renderPositions() {
       <td class="num">${fmtPct(p.highestPnlPercent, 0)}</td>
       <td>${p.trailingActive ? `<span class="badge good">TRAILING ${s.trailingStopPercent}%</span>` : `<span class="badge">TP @ +${p.nextTpThreshold}%</span>`}</td>
       <td class="mono t2" title="${esc(p.whaleWallet)}">${short(p.whaleWallet)}</td>
+      <td class="num" title="${esc(whaleTitle)}">${whalePnl}</td>
       <td class="num">${ago(p.openedAt)}</td>
       <td><button class="sm danger" data-close="${esc(p.id)}" ${p.status !== 'open' ? 'disabled' : ''}>Sell</button></td></tr>`;
     }).join('')}</tbody></table>`;
