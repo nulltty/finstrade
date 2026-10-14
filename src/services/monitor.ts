@@ -3,10 +3,18 @@ import { tokenDataAggregator } from './aggregator.js';
 import { tradeExecutor } from './executor.js';
 import { telegramBot } from '../bot/telegram.js';
 import { settingsService } from './settings.js';
+import { getJupiterQuote } from './solana.js';
+import { WSOL_MINT } from '../config/index.js';
 import { audit } from './audit.js';
 import { logger } from './logger.js';
 
+const ROUTE_CHECK_INTERVAL_MS = 60_000;
+const ROUTE_MISSES_BEFORE_EXIT = 2; // a single Jupiter blip must never liquidate the book
+
 export class PositionMonitorService {
+  /** Throttle + confirmation state for the exit-door watchdog, keyed by position id */
+  private routeCheckedAt = new Map<string, number>();
+  private routeMisses = new Map<string, number>();
   /**
    * Monitor all open positions and execute SL/TP logic
    */
@@ -48,6 +56,32 @@ export class PositionMonitorService {
     });
 
     const settings = await settingsService.getSettings();
+
+    // 0. EXIT-DOOR WATCHDOG: a position we cannot sell is the real risk, not the price. Jupiter
+    // quotes are free reads, so check periodically that a route still exists and act before the
+    // stop loss fires into a door that already closed. Two consecutive misses are required so a
+    // single API blip can never liquidate the book.
+    if (!pos.isPaper && pos.entryRawAmount && Date.now() - (this.routeCheckedAt.get(pos.id) ?? 0) > ROUTE_CHECK_INTERVAL_MS) {
+      this.routeCheckedAt.set(pos.id, Date.now());
+      const exitSlippage = Math.min(5000, settings.slippageBps * 2);
+      const quote = await getJupiterQuote(pos.tokenAddress, WSOL_MINT, BigInt(pos.entryRawAmount), exitSlippage);
+      if (quote) {
+        this.routeMisses.delete(pos.id);
+      } else {
+        const misses = (this.routeMisses.get(pos.id) ?? 0) + 1;
+        this.routeMisses.set(pos.id, misses);
+        logger.warn({ positionId: pos.id, token: pos.tokenSymbol, misses, pnlPercent }, 'No sell route for open position');
+        if (misses >= ROUTE_MISSES_BEFORE_EXIT) {
+          this.routeMisses.delete(pos.id);
+          await audit('LIQUIDITY_GONE', `No sell route after ${misses} checks — exiting while anything still fits`, {
+            positionId: pos.id,
+            pnlPercent,
+          });
+          await tradeExecutor.executeSell(pos.id, 'liquidity_gone', currentPrice);
+          return;
+        }
+      }
+    }
 
     // 1. STOP-LOSS: always automatic, no approval; notify after execution
     if (pnlPercent <= -settings.stopLossPercent) {

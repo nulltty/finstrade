@@ -27,6 +27,8 @@ export interface BuyResult {
 
 export interface SellResult {
   success: boolean;
+  /** Only a slice of the position could be sold; the remainder is still held and tracked */
+  partial?: boolean;
   exitPrice?: number;
   pnlPercent?: number;
   pnlUsd?: number;
@@ -41,10 +43,17 @@ export type ExitReason =
   | 'take_profit_approved'
   | 'take_profit_timeout'
   | 'whale_exit'
+  | 'liquidity_gone'
   | 'manual';
 
 const FEE_BUFFER_SOL = 0.01; // ATA rent + priority fee headroom per swap
 const MAX_SWAP_ATTEMPTS = 3; // a blockhash-expired swap is provably dead — safe to retry with a fresh one
+
+/**
+ * A thin pool often cannot absorb a whole position at once. Walking the size down gets us
+ * partially out instead of trapped at 100% while the price keeps falling.
+ */
+const SELL_SIZE_FALLBACKS = [1, 0.5, 0.25, 0.1];
 
 /**
  * Live buys are serialised. Each one sizes itself against the wallet's SOL balance, so two
@@ -252,6 +261,8 @@ export class TradeExecutor {
       let proceedsUsd = position.entryAmount * exitPrice;
       let solAmount: number | null = null;
       let txHash: string;
+      let tokensSold = position.entryAmount;
+      let remainingRaw = 0n;
 
       if (position.isPaper) {
         txHash = `paper_sell_${crypto.randomBytes(16).toString('hex')}`;
@@ -260,6 +271,8 @@ export class TradeExecutor {
         txHash = live.txHash;
         solAmount = live.solReceived;
         proceedsUsd = live.solReceived * (await getSolPriceUsd());
+        tokensSold = live.tokensSold;
+        remainingRaw = live.remainingRaw;
         if (live.tokensSold > 0) exitPrice = proceedsUsd / live.tokensSold;
       }
 
@@ -276,7 +289,7 @@ export class TradeExecutor {
           chain: position.chain,
           tokenAddress: position.tokenAddress,
           price: exitPrice,
-          amount: position.entryAmount,
+          amount: tokensSold,
           totalUsd: proceedsUsd,
           solAmount,
           txHash,
@@ -286,6 +299,33 @@ export class TradeExecutor {
           isPaper: position.isPaper,
         },
       });
+
+      if (remainingRaw > 0n) {
+        // Only a slice fit through the pool. Keep the position open for the remainder so the
+        // tokens stay tracked and the next trigger tries again, with the cost basis reduced
+        // by the fraction we did get out of.
+        const soldFraction = position.entryAmount > 0 ? Math.min(1, tokensSold / position.entryAmount) : 0;
+        const updated = await prisma.position.update({
+          where: { id: positionId },
+          data: {
+            status: 'open',
+            entryAmount: Math.max(0, position.entryAmount - tokensSold),
+            entryRawAmount: remainingRaw.toString(),
+            costUsd: position.costUsd * (1 - soldFraction),
+            proceedsUsd: (position.proceedsUsd || 0) + proceedsUsd,
+            sellFailCount: { increment: 1 },
+          },
+        });
+        const pct = (soldFraction * 100).toFixed(0);
+        logger.warn({ positionId, reason, soldPct: pct, remaining: remainingRaw.toString() }, 'Partial exit — remainder still held, retrying on next trigger');
+        await audit('SELL_PARTIAL', `${reason}: sold ${pct}%, remainder still held`, { positionId, proceedsUsd, txHash });
+
+        if (updated.sellFailCount === 3 || updated.sellFailCount % 10 === 0) {
+          const { telegramBot } = await import('../bot/telegram.js');
+          await telegramBot.sendSellStuckAlert(positionId, updated.sellFailCount, `pool hanya menyerap ${pct}% per percobaan`);
+        }
+        return { success: false, partial: true, error: `partial exit: ${pct}% sold, remainder still held`, txHash };
+      }
 
       await prisma.position.update({
         where: { id: positionId },
@@ -380,6 +420,17 @@ export class TradeExecutor {
     throw lastErr;
   }
 
+  /** First sellable slice of `raw`, trying progressively smaller fractions */
+  private async quoteSell(mint: string, raw: bigint, slippage: number) {
+    for (const frac of SELL_SIZE_FALLBACKS) {
+      const amount = frac === 1 ? raw : (raw * BigInt(Math.round(frac * 100))) / 100n;
+      if (amount <= 0n) continue;
+      const quote = await getJupiterQuote(mint, WSOL_MINT, amount, slippage);
+      if (quote) return { quote, amount, frac };
+    }
+    return null;
+  }
+
   private async liveSell(mint: string, settings: BotSettingsData) {
     const kp = await getTradingKeypair();
     if (!kp) throw new Error('No trading wallet key');
@@ -390,30 +441,38 @@ export class TradeExecutor {
 
     // Slippage widens on exits: getting out matters more than the last few %
     const slippage = Math.min(5000, settings.slippageBps * 2);
+    const toUi = (raw: bigint) => Number(raw) / 10 ** balance.decimals;
 
     let lastErr: any;
     for (let attempt = 1; attempt <= MAX_SWAP_ATTEMPTS; attempt++) {
-      const quote = await getJupiterQuote(mint, WSOL_MINT, balance.raw, slippage);
-      if (!quote) throw new Error('No Jupiter route for sell');
+      const sized = await this.quoteSell(mint, balance.raw, slippage);
+      if (!sized) {
+        throw new Error(`No Jupiter route for sell (tried ${SELL_SIZE_FALLBACKS.map((f) => f * 100 + '%').join('/')})`);
+      }
+      const { quote, amount, frac } = sized;
+      if (frac < 1) {
+        logger.warn({ mint, frac, amount: amount.toString() }, 'Pool cannot absorb the whole position — selling a slice');
+      }
 
-      logger.info({ mint, attempt, amount: balance.raw.toString(), outLamports: quote.outAmount }, 'Sending live Jupiter SELL');
+      logger.info({ mint, attempt, amount: amount.toString(), frac, outLamports: quote.outAmount }, 'Sending live Jupiter SELL');
       try {
         const txHash = await executeJupiterSwap(quote, kp, settings.maxPriorityFee);
         const parsed = await fetchNormalizedTx(txHash, owner);
         const solReceived = parsed ? Math.max(0, parsed.solDelta) : Number(quote.outAmount) / LAMPORTS_PER_SOL;
-        return { txHash, solReceived, tokensSold: balance.ui };
+        return { txHash, solReceived, tokensSold: toUi(amount), remainingRaw: balance.raw - amount };
       } catch (err: any) {
         const sig = extractAmbiguousSig(err);
         if (sig) {
           // Confirmation was ambiguous — check the wallet directly before deciding.
           const after = await getTokenBalance(owner, mint);
-          if (after.raw <= 0n) {
-            // Tokens are gone — the sell actually landed. Recover the proceeds instead
-            // of treating it as a failure (which would risk firing a second sell).
-            logger.warn({ mint, sig }, 'SELL landed on-chain despite confirmation timeout — recovering proceeds from wallet balance');
+          if (after.raw < balance.raw) {
+            // Balance dropped — the sell landed (possibly only a slice). Recover the proceeds
+            // instead of treating it as a failure, which would risk firing a second sell.
+            const sold = balance.raw - after.raw;
+            logger.warn({ mint, sig, sold: sold.toString() }, 'SELL landed on-chain despite confirmation timeout — recovering proceeds from wallet balance');
             const parsed = await fetchNormalizedTx(sig, owner);
             const solReceived = parsed ? Math.max(0, parsed.solDelta) : Number(quote.outAmount) / LAMPORTS_PER_SOL;
-            return { txHash: sig, solReceived, tokensSold: balance.ui };
+            return { txHash: sig, solReceived, tokensSold: toUi(sold), remainingRaw: after.raw };
           }
           // Tokens are still here. The original tx referenced a now-expired blockhash,
           // which Solana guarantees can never be processed later — it's provably dead,
