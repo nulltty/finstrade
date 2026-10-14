@@ -173,7 +173,11 @@ export class WalletProfilerService {
     const isManual = existing?.discoveredVia === 'manual_dashboard' || existing?.discoveredVia === 'env_config';
 
     const data = {
-      profileStatus: profile.qualified ? 'qualified' : 'rejected',
+      // A wallet the owner picked is never marked 'rejected'. It stays monitored either way
+      // (the scanner gates on isActive, not this field), so labelling it rejected contradicts
+      // its own behaviour. 'manual' says the thresholds were not applied, which is the truth —
+      // calling it 'qualified' would claim it passed profiling when it has not.
+      profileStatus: profile.qualified ? 'qualified' : isManual ? 'manual' : 'rejected',
       profileReason: profile.reason,
       tradesAnalyzed: profile.tradesAnalyzed,
       closedTrades: profile.closedTrades,

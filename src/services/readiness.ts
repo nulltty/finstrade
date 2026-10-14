@@ -164,7 +164,9 @@ export async function computeReadiness(opts: { uptimeSec?: number | null } = {})
   const [sellFailures, breakerLogs, qualifiedWhales] = await Promise.all([
     prisma.auditLog.count({ where: { action: 'SELL_FAILED', createdAt: { gte: since7 } } }),
     prisma.auditLog.findMany({ where: { action: 'CIRCUIT_BREAKER_TRIPPED', createdAt: { gte: since14 } }, select: { createdAt: true } }),
-    prisma.watchedWallet.count({ where: { profileStatus: 'qualified', isActive: true } }),
+    // Hand-picked wallets count as usable too: they are deliberately monitored, just not
+    // vetted against the automatic thresholds
+    prisma.watchedWallet.count({ where: { profileStatus: { in: ['qualified', 'manual'] }, isActive: true } }),
   ]);
   const breakerDays = new Set(breakerLogs.map((l) => l.createdAt.toISOString().slice(0, 10))).size;
 

@@ -434,6 +434,7 @@
         <select id="whaleFilter" style="width:auto">
           <option value="active">Active</option>
           <option value="qualified">Qualified</option>
+          <option value="manual">Manual</option>
           <option value="candidate">Candidates</option>
           <option value="rejected">Rejected</option>
           <option value="all">All</option>
@@ -788,12 +789,12 @@ function renderWhales() {
     <th class="num" title="Estimasi total isi wallet (SOL + token yang bisa dihargai). Nilai dasar: mint yang tidak ketemu harganya dilewati">Est. aset</th>
     <th class="num">Avg hold</th><th class="num">Signals</th><th class="num">Scanned</th><th></th></tr></thead><tbody>
     ${list.slice(0, 150).map((w) => {
-      const st = w.profileStatus === 'qualified' ? 'good' : w.profileStatus === 'rejected' ? 'bad' : 'warn';
+      const st = w.profileStatus === 'qualified' ? 'good' : w.profileStatus === 'rejected' ? 'bad' : w.profileStatus === 'manual' ? 'neon' : 'warn';
       return `<tr>
         <td class="mono"><a href="https://solscan.io/account/${esc(w.address)}" target="_blank" rel="noopener">${short(w.address)}</a></td>
         <td title="${esc(w.discoveredVia)}">${esc((w.label || '').slice(0, 34))}</td>
         <td><span class="badge ${st}">${esc(w.profileStatus.toUpperCase())}</span> ${w.isActive ? '<span class="badge neon">ON</span>' : ''}
-          ${w.profileStatus === 'rejected' && w.profileReason ? `<div class="muted" style="font-size:11px;margin-top:3px">${esc(w.profileReason)}</div>` : ''}</td>
+          ${(w.profileStatus === 'rejected' || w.profileStatus === 'manual') && w.profileReason ? `<div class="muted" style="font-size:11px;margin-top:3px">${esc(w.profileReason)}</div>` : ''}</td>
         <td class="num">${w.whaleScore ? Math.round(w.whaleScore) : '—'}</td>
         <td class="num">${w.closedTrades ? (w.winRate || 0).toFixed(0) + '%' : '—'}</td>
         <td class="num">${w.wins || 0}W/${w.losses || 0}L</td>
