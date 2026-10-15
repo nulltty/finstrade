@@ -24,6 +24,8 @@ export interface ReadinessCheck {
 export interface ReadinessTrade {
   symbol: string;
   token: string;
+  /** Which strategy opened it, so a two-strategy record can be read apart */
+  strategy: string;
   isPaper: boolean;
   openedAt: string;
   closedAt: string;
@@ -96,6 +98,7 @@ export async function loadClosedTrades(): Promise<{ trades: ReadinessTrade[]; ha
     return {
       symbol: p.tokenSymbol || '?',
       token: p.tokenAddress,
+      strategy: p.strategy,
       isPaper: p.isPaper,
       openedAt: p.openedAt.toISOString(),
       closedAt: (p.closedAt || p.updatedAt).toISOString(),

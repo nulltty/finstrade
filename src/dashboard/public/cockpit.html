@@ -419,7 +419,8 @@
   <!-- Signals + inspector -->
   <section class="panel c5">
     <h2>Signal feed <span class="tag">klik untuk inspeksi</span>
-      <span class="right"><button class="sm" id="btnSim" title="Sinyal simulasi — selalu paper">Simulate</button></span></h2>
+      <span class="right"><button class="sm" id="btnDipScan" title="Cari meme coin oversold sekarang (strategy 2)">Scan dips</button>
+        <button class="sm" id="btnSim" title="Sinyal simulasi — selalu paper">Simulate</button></span></h2>
     <div class="feed" id="feed"></div>
   </section>
   <section class="panel c7">
@@ -546,6 +547,7 @@ function renderOverview(o) {
     ['pipeline', 'PIPE', null],
     ['monitor', 'MON', 60],
     ['discovery', 'DISC', (s.autoDiscoveryIntervalMin || 60) * 120],
+    ...(s.dipStrategyEnabled ? [['dipScanner', 'DIP', (s.dipScanIntervalMin || 5) * 180]] : []),
   ];
   $('engines').innerHTML = engines.map(([k, label, staleAfter]) => {
     const e = o.engines[k];
@@ -597,6 +599,14 @@ function renderOverview(o) {
     ['Signals 24h', st.signals24h, `threshold ≥ ${s.scoringThreshold}`],
     ['Whales active', whales.active || 0, `${whales.qualified || 0} qualified · ${whales.candidate || 0} pending · ${whales.rejected || 0} rejected`],
   ];
+  if (s.dipStrategyEnabled) {
+    const dip = (st.byStrategy || {}).dip_reversal || { open: 0, closed: 0, wins: 0, realizedPnlUsd: 0 };
+    tiles.push([
+      'Dip strategy',
+      `<span class="${cls(dip.realizedPnlUsd)}">${fmtSigned(dip.realizedPnlUsd)}</span>`,
+      `${dip.open} terbuka · ${dip.wins}/${dip.closed} profit · masuk ${s.dipEntrySol} SOL · TP ${fmtUsd(s.dipTakeProfitUsd, 0)}–${fmtUsd(s.dipTakeProfitMaxUsd, 0)}`,
+    ]);
+  }
   $('kpis').innerHTML = tiles.map(([l, v, sub, m]) => `
     <div class="kpi"><div class="lbl">${l}</div><div class="val">${v}</div><div class="sub">${sub}</div>
     ${m != null ? `<div class="meter"><i style="width:${Math.max(2, m).toFixed(0)}%"></i></div>` : ''}</div>`).join('');
@@ -629,14 +639,28 @@ function renderOverview(o) {
 
 /* ───────── Positions ───────── */
 function gauge(p, s) {
-  const lo = -s.stopLossPercent, hi = Math.max(s.takeProfitPercent, p.nextTpThreshold, p.highestPnlPercent);
+  // A $-target position's "TP line" is that target expressed against its own cost basis
+  const tpPct = p.tpUsdTarget != null && p.costUsd > 0 ? (p.tpUsdTarget / p.costUsd) * 100 : null;
+  const lo = -(p.slPercentOverride ?? s.stopLossPercent);
+  const hi = Math.max(tpPct ?? Math.max(s.takeProfitPercent, p.nextTpThreshold), p.highestPnlPercent, 1);
   const x = (v) => ((Math.min(hi, Math.max(lo, v)) - lo) / (hi - lo)) * 100;
   const z = x(0), cur = x(p.pnlPercent);
   const left = Math.min(z, cur), width = Math.abs(cur - z);
   const color = p.pnlPercent >= 0 ? 'var(--good)' : 'var(--bad)';
-  return `<div class="gauge" title="SL ${lo}% · TP ${p.nextTpThreshold}% · peak ${fmtPct(p.highestPnlPercent)}">
+  return `<div class="gauge" title="SL ${lo}% · TP ${tpPct != null ? fmtUsd(p.tpUsdTarget, 0) + ' (≈' + tpPct.toFixed(1) + '%)' : p.nextTpThreshold + '%'} · peak ${fmtPct(p.highestPnlPercent)}">
     <div class="fill" style="left:${left}%;width:${Math.max(1, width)}%;background:${color}"></div>
     <div class="zero" style="left:${z}%"></div><div class="peak" style="left:${x(p.highestPnlPercent)}%"></div></div>`;
+}
+/** What will close this position: a $ target, an armed trail, or the % ladder */
+function exitPlan(p, s) {
+  const trail = p.trailPercentOverride ?? s.trailingStopPercent;
+  if (p.tpUsdTarget != null) {
+    const band = `${fmtUsd(p.tpUsdTarget, 0)}–${fmtUsd(p.tpUsdStretch ?? p.tpUsdTarget, 0)}`;
+    return p.trailingActive
+      ? `<span class="badge good" title="Target tercapai, masih naik — dijual saat momentum berhenti atau di ${fmtUsd(p.tpUsdStretch ?? p.tpUsdTarget, 0)}">RIDING → ${band}</span>`
+      : `<span class="badge" title="Take-profit absolut: dihitung dari harga jual nyata (quote Jupiter), bukan harga mid">TP ${band} bersih</span>`;
+  }
+  return p.trailingActive ? `<span class="badge good">TRAILING ${trail}%</span>` : `<span class="badge">TP @ +${p.nextTpThreshold}%</span>`;
 }
 function renderPositions() {
   const s = state.overview?.settings;
@@ -660,13 +684,16 @@ function renderPositions() {
         ? '<span class="muted">—</span>'
         : `<span class="${cls(w.realizedPnlSol)}"><b>${(w.realizedPnlSol >= 0 ? '+' : '−') + Math.abs(w.realizedPnlSol).toFixed(2)}</b></span>` +
           `<br><span style="font-size:11px" class="muted">${(w.winRate || 0).toFixed(0)}% WR</span>`;
-      const whaleTitle = !w
+      const whaleTitle = p.strategy !== 'whale_copy'
+        ? 'Bukan copy-trade — sinyal dari scanner RSI dip'
+        : !w
         ? 'Wallet tidak ada di watchlist lagi'
         : !w.closedTrades
           ? 'Belum ada trade tertutup yang bisa diprofil'
           : `${w.wins || 0}W/${w.losses || 0}L dari ${w.closedTrades} trade${w.balanceSol != null ? ` · saldo ${w.balanceSol.toFixed(2)} SOL` : ''}`;
       return `<tr>
-      <td><a href="https://dexscreener.com/solana/${esc(p.tokenAddress)}" target="_blank" rel="noopener"><b>${esc(p.tokenSymbol)}</b></a></td>
+      <td><a href="https://dexscreener.com/solana/${esc(p.tokenAddress)}" target="_blank" rel="noopener"><b>${esc(p.tokenSymbol)}</b></a>
+        ${p.strategy === 'dip_reversal' ? '<span class="badge neon" title="Strategy 2 — RSI dip reversal">DIP</span>' : ''}</td>
       <td>${p.isPaper ? '<span class="badge warn">PAPER</span>' : '<span class="badge bad">LIVE</span>'}${p.status === 'closing' ? ' <span class="badge neon">SELLING…</span>' : ''}</td>
       <td class="num">${fmtUsd(p.costUsd)}</td>
       <td class="num">${fmtPrice(p.entryPrice)}</td>
@@ -674,7 +701,7 @@ function renderPositions() {
       <td class="num ${cls(p.pnlPercent)}"><b>${fmtPct(p.pnlPercent)}</b><br><span style="font-size:11px">${fmtSigned(pnlUsd)}</span></td>
       <td>${gauge(p, s)}</td>
       <td class="num">${fmtPct(p.highestPnlPercent, 0)}</td>
-      <td>${p.trailingActive ? `<span class="badge good">TRAILING ${s.trailingStopPercent}%</span>` : `<span class="badge">TP @ +${p.nextTpThreshold}%</span>`}</td>
+      <td>${exitPlan(p, s)}</td>
       <td class="mono t2" title="${esc(p.whaleWallet)}">${short(p.whaleWallet)}</td>
       <td class="num" title="${esc(whaleTitle)}">${whalePnl}</td>
       <td class="num">${ago(p.openedAt)}</td>
@@ -696,6 +723,15 @@ const STATUS_BADGE = {
   scored: ['REJECTED', 'bad'], failed: ['BLOCKED', 'bad'], skipped: ['SKIPPED', 'warn'], timeout_expired: ['TIMEOUT', 'warn'],
   detected: ['SCANNING', ''], aggregated: ['SCORING', ''],
 };
+/** One line on where the signal came from — a whale, or the dip scanner's own reading */
+function signalOrigin(sg) {
+  if (sg.source === 'dip_reversal') {
+    const meta = sg.strategyMeta || {};
+    const rsi = typeof meta.rsi === 'number' ? meta.rsi.toFixed(0) : '—';
+    return `📉 RSI ${rsi} · narasi ${meta.narrativeScore ?? '—'} · ${fmtUsd(sg.amountUsd, 0)}`;
+  }
+  return `🐋 ${short(sg.wallet)} · ${fmtUsd(sg.amountUsd, 0)}`;
+}
 function renderFeed() {
   if (!state.signals.length) { $('feed').innerHTML = '<div class="empty">Belum ada sinyal. Scanner memantau whale aktif tiap beberapa detik.</div>'; return; }
   $('feed').innerHTML = state.signals.map((sg) => {
@@ -705,7 +741,7 @@ function renderFeed() {
       ${ring(sg.score?.totalScore, passed)}
       <div style="min-width:0"><div><span class="sym">${esc(sg.tokenSymbol || short(sg.tokenAddress))}</span>
         <span class="muted" style="font-size:11px"> ${esc((sg.tokenName || '').slice(0, 28))}</span></div>
-        <div class="meta">🐋 ${short(sg.wallet)} · ${fmtUsd(sg.amountUsd, 0)} · ${ago(sg.createdAt)} ago</div></div>
+        <div class="meta">${signalOrigin(sg)} · ${ago(sg.createdAt)} ago</div></div>
       <span class="badge ${c}">${label}</span></div>`;
   }).join('');
 }
@@ -713,6 +749,25 @@ function renderFeed() {
 function check(state_, title, value) {
   const ic = state_ === 'pass' ? '✓' : state_ === 'fail' ? '✗' : '?';
   return `<div class="check ${state_}"><span class="ic">${ic}</span><div><div>${title}</div><div class="v">${value}</div></div></div>`;
+}
+/** Why the dip scanner fired: the RSI reading, the narrative and every condition it checked */
+function dipEvidence(sg) {
+  if (sg.source !== 'dip_reversal') return '';
+  const m = sg.strategyMeta || {};
+  const n = (v, d = 1) => (typeof v === 'number' ? v.toFixed(d) : '—');
+  const checks = (m.checks || []).map((c) =>
+    `<span class="badge ${c.ok ? 'good' : 'bad'}" style="margin:2px" title="${esc(c.detail)}">${esc(c.name)}</span>`).join('');
+  const tags = (m.narrativeTags || []).map((t) => `<span class="badge neon" style="margin:2px">${esc(t)}</span>`).join('');
+  return `<div class="confirm-box" style="margin-bottom:12px">
+    <b>📉 RSI dip reversal</b> <span class="muted mono" style="font-size:11px">${esc(m.timeframe || '')} · ${esc(m.candleSource || '')} · ${m.bars ?? '—'} bar</span><br>
+    RSI <b>${n(m.rsi)}</b> (low ${n(m.rsiLow)}, sebelumnya ${n(m.rsiPrev)}) · +${n(m.bounceFromLowPct, 2)}% dari low ·
+    volume ${n(m.volumeVsBasePct, 0)}% baseline · EMA21 ${m.ema21 ? Number(m.ema21).toPrecision(4) : '—'} / EMA50 ${m.ema50 ? Number(m.ema50).toPrecision(4) : '—'}<br>
+    <div style="margin:6px 0">${checks}</div>
+    Narasi <b>${esc(m.narrative || 'tidak dikenali')}</b> ${n(m.narrativeScore, 0)}/100 ${tags}
+    <div class="muted" style="font-size:11px;margin-top:4px">${(m.narrativeNotes || []).map(esc).join(' · ')}</div>
+    <div class="mono muted" style="font-size:11px;margin-top:6px">rencana: masuk ${n(m.entrySol, 2)} SOL (${fmtUsd(m.entryUsd, 0)}) ·
+      TP ${fmtUsd(m.tpUsd, 2)}–${fmtUsd(m.tpUsdMax, 2)} bersih · SL −${n(m.slPercent, 0)}%</div>
+  </div>`;
 }
 function renderInspector() {
   const sg = state.signals.find((x) => x.id === state.selectedSignal);
@@ -727,12 +782,13 @@ function renderInspector() {
 
   const yes = (b) => (b ? 'fail' : 'pass');
   const src = m.dataSources || {};
+  const impactLimit = sg.source === 'dip_reversal' ? s.dipMaxPriceImpactPct : s.maxPriceImpactPct;
   const checks = [
     check(m.isHoneypot ? 'fail' : 'pass', 'Honeypot / exit block', m.isHoneypot ? esc((m.honeypotReasons || []).join('; ') || 'detected') : 'clean'),
     check(m.sellRouteOk === true ? 'pass' : m.sellRouteOk === false ? 'fail' : 'unk', 'Sell route (Jupiter sim)',
       m.sellRouteOk == null ? 'tidak bisa dicek' : `round-trip ${m.roundTripLossPct != null ? '−' + Number(m.roundTripLossPct).toFixed(1) + '%' : '—'} (max ${s.maxRoundTripLossPct}%)`),
-    check(m.buyPriceImpactPct == null ? 'unk' : m.buyPriceImpactPct > s.maxPriceImpactPct ? 'fail' : 'pass', 'Price impact (ukuran kita)',
-      m.buyPriceImpactPct == null ? '—' : `${Number(m.buyPriceImpactPct).toFixed(2)}% (max ${s.maxPriceImpactPct}%)`),
+    check(m.buyPriceImpactPct == null ? 'unk' : m.buyPriceImpactPct > impactLimit ? 'fail' : 'pass', 'Price impact (ukuran kita)',
+      m.buyPriceImpactPct == null ? '—' : `${Number(m.buyPriceImpactPct).toFixed(2)}% (max ${impactLimit}%)`),
     check(yes(m.hasMintFunction), 'Mint authority', m.hasMintFunction ? 'aktif — supply bisa dicetak' : 'revoked'),
     check(yes(m.hasFreezeAuthority), 'Freeze authority', m.hasFreezeAuthority ? 'aktif — wallet bisa dibekukan' : 'revoked'),
     check(m.isLiquidityLocked ? 'pass' : 'fail', 'LP locked / burned', `${m.lockedPercentage ?? 0}% · liq ${fmtUsd(m.liquidityUsd, 0)}`),
@@ -760,6 +816,7 @@ function renderInspector() {
   $('inspector').innerHTML = `
     ${sc.isHardFail ? `<div class="hardfail">⛔ HARD FAIL — ${(sc.hardFailReasons || []).map(esc).join(' · ')}</div>` : ''}
     ${decision}
+    ${dipEvidence(sg)}
     <div style="display:flex;gap:18px;flex-wrap:wrap;align-items:center;margin-bottom:12px">
       <div class="score-big">${sc.totalScore}<span class="muted serif" style="font-size:22px;letter-spacing:0"> /100</span></div>
       <div class="mono t2" style="font-size:12px">MC ${fmtUsd(m.marketCap, 0)} · Vol24h ${fmtUsd(m.volume24h, 0)} · Price ${fmtPrice(m.priceUsd)}<br>
@@ -768,7 +825,7 @@ function renderInspector() {
       <div style="margin-left:auto;display:flex;gap:8px;flex-wrap:wrap">
         <a href="https://dexscreener.com/solana/${esc(sg.tokenAddress)}" target="_blank" rel="noopener">DexScreener ↗</a>
         <a href="https://rugcheck.xyz/tokens/${esc(sg.tokenAddress)}" target="_blank" rel="noopener">RugCheck ↗</a>
-        <a href="https://solscan.io/account/${esc(sg.wallet)}" target="_blank" rel="noopener">Whale ↗</a>
+        ${sg.source === 'dip_reversal' ? '' : `<a href="https://solscan.io/account/${esc(sg.wallet)}" target="_blank" rel="noopener">Whale ↗</a>`}
       </div>
     </div>
     ${factorRows}
@@ -1056,6 +1113,30 @@ const SETTINGS_SECTIONS = [
     ['minWhaleBuyUsd', 'Min whale buy USD', 'num'],
     ['maxSignalAgeSec', 'Max signal age (detik)', 'int'],
   ]],
+  ['STRATEGY 2 — RSI DIP REVERSAL', [
+    ['dipStrategyEnabled', 'Aktifkan scanner dip (RSI + narasi)', 'bool', 'Cari meme coin sehat yang oversold dan mulai naik lagi — jalan berdampingan dengan copy-trade whale'],
+    ['dipEntrySol', 'Entry per posisi (SOL)', 'num'],
+    ['dipTakeProfitUsd', 'Take-profit minimum (USD bersih)', 'num'],
+    ['dipTakeProfitMaxUsd', 'Take-profit maksimum / stretch (USD)', 'num'],
+    ['dipStopLossPercent', 'Stop-loss %', 'num'],
+    ['dipTrailingStopPercent', 'Trailing stop % (0 = off)', 'num'],
+    ['dipMaxOpenPositions', 'Max posisi dip', 'int'],
+    ['dipScanIntervalMin', 'Scan interval (menit)', 'int'],
+    ['dipRsiTimeframe', 'Timeframe candle', ['5m', '15m', '1h', '4h']],
+    ['dipRsiPeriod', 'RSI period', 'int'],
+    ['dipRsiOversold', 'RSI oversold (harus pernah ≤ ini)', 'num'],
+    ['dipRsiMax', 'RSI maksimum saat masuk', 'num'],
+    ['dipMinLiquidityUsd', 'Min liquidity USD', 'num'],
+    ['dipMinVolume24hUsd', 'Min volume 24h USD', 'num'],
+    ['dipMinTokenAgeHours', 'Min umur token (jam)', 'num'],
+    ['dipMaxDrawdown24hPct', 'Max penurunan 24h % (lebih dari ini = dilewati)', 'num'],
+    ['dipMinBuySellRatio', 'Min rasio buy/sell 1 jam', 'num'],
+    ['dipMinNarrativeScore', 'Min skor narasi', 'num'],
+    ['dipScoringThreshold', 'Score threshold', 'num'],
+    ['dipMaxPriceImpactPct', 'Max price impact %', 'num'],
+    ['dipCooldownMinutes', 'Cooldown per token (menit)', 'int'],
+    ['dipNarrativeKeywords', 'Keyword narasi tambahan (pisahkan koma)', 'text'],
+  ]],
   ['SCANNER', [
     ['autoScanIntervalSec', 'Scan interval (detik)', 'int'],
     ['autoDiscoveryEnabled', 'Auto discovery', 'bool'],
@@ -1165,6 +1246,10 @@ $('btnKill').onclick = async () => {
 };
 $('btnDiscover').onclick = async () => { await api('/api/wallets/auto-discover', { method: 'POST' }); toast('Discovery dijalankan — hasil muncul dalam beberapa menit'); };
 $('btnScan').onclick = async () => { await api('/api/wallets/scan-now', { method: 'POST' }); toast('Scan dijalankan'); };
+$('btnDipScan').onclick = async () => {
+  try { await api('/api/dip/scan-now', { method: 'POST' }); toast('Scan dip dijalankan — hasil muncul di feed dalam ±1 menit'); }
+  catch (e) { toast(e.message, true); }
+};
 $('btnSim').onclick = async () => { await api('/api/simulate-signal', { method: 'POST', body: '{}' }); toast('Sinyal simulasi dikirim (paper)'); setTimeout(refreshData, 1500); };
 $('btnAdd').onclick = async () => {
   const address = $('newAddr').value.trim(); if (!address) return;

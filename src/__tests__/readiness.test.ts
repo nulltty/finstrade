@@ -2,7 +2,7 @@ import { describe, it, expect } from 'vitest';
 import { summarize, ReadinessTrade } from '../services/readiness.js';
 
 const t = (pnlPct: number, haircut = 6, cost = 10): ReadinessTrade => ({
-  symbol: 'T', token: 'x', isPaper: true, openedAt: '', closedAt: '', holdMinutes: 30,
+  symbol: 'T', token: 'x', strategy: 'whale_copy', isPaper: true, openedAt: '', closedAt: '', holdMinutes: 30,
   costUsd: cost, pnlUsd: (cost * pnlPct) / 100, pnlPct,
   adjPnlUsd: (cost * (pnlPct - haircut)) / 100, adjPnlPct: pnlPct - haircut,
   exitReason: 'trailing_stop', score: 85, roundTripLossPct: null, buyPriceImpactPct: null, whale: 'w', whaleWinRate: 70,

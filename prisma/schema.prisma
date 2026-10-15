@@ -10,6 +10,12 @@ generator client {
 model Signal {
   id                    String                 @id @default(uuid())
   wallet                String
+  /// Which strategy produced this signal: 'whale_copy' (a watched whale bought) or
+  /// 'dip_reversal' (the RSI/narrative scanner found an oversold healthy coin turning up).
+  source                String                 @default("whale_copy")
+  /// Strategy-specific evidence (RSI readings, narrative score, per-check results) so the
+  /// cockpit and Telegram can show *why* a non-whale signal fired.
+  strategyMeta          Json?                  @map("strategy_meta")
   chain                 String                 // 'solana' | 'evm'
   tokenAddress          String                 @map("token_address")
   tokenSymbol           String?                @map("token_symbol")
@@ -54,6 +60,9 @@ model Position {
   /** Soft delete: kept for the record but excluded from the cockpit and its stats */
   archived              Boolean                @default(false)
   signalId              String?                @map("signal_id")
+  /// Mirrors Signal.source: the strategy that opened this position. Each strategy carries its
+  /// own exit plan (below), so one bot can run several at once without their rules colliding.
+  strategy              String                 @default("whale_copy")
   chain                 String
   tokenAddress          String                 @map("token_address")
   tokenSymbol           String?                @map("token_symbol")
@@ -77,6 +86,14 @@ model Position {
   pnlPercent            Float                  @default(0) @map("pnl_percent")
   highestPnlPercent     Float                  @default(0) @map("highest_pnl_percent")
   nextTpThreshold       Float                  @default(100) @map("next_tp_threshold")
+  /// Absolute-USD take profit, used instead of the percentage ladder when set: bank the
+  /// position once this much profit is actually realisable, ride to tpUsdStretch if it keeps
+  /// running. This is how the dip strategy takes a consistent few dollars per trade.
+  tpUsdTarget           Float?                 @map("tp_usd_target")
+  tpUsdStretch          Float?                 @map("tp_usd_stretch")
+  /// Per-position overrides of the global exit settings (null = use the global setting)
+  slPercentOverride     Float?                 @map("sl_percent_override")
+  trailPercentOverride  Float?                 @map("trail_percent_override")
   status                String                 @default("open") // open, closing, closed
   sellFailCount         Int                    @default(0) @map("sell_fail_count")
   exitPrice             Float?                 @map("exit_price")
@@ -198,6 +215,35 @@ model BotSetting {
   scoringThreshold      Float                  @default(75.0) @map("scoring_threshold")
   minLiquidityUsd       Float                  @default(10000.0) @map("min_liquidity_usd")
   hardFailMinLiquidity  Float                  @default(5000.0) @map("hard_fail_min_liquidity")
+
+  // ── Strategy 2: RSI dip reversal (independent of the whale copy pipeline) ──
+  dipStrategyEnabled    Boolean                @default(false) @map("dip_strategy_enabled")
+  dipScanIntervalMin    Int                    @default(5) @map("dip_scan_interval_min")
+  /// Fixed SOL per entry — the $4–$5 profit target is sized against this, so it is SOL and
+  /// not a USD/percent amount on purpose.
+  dipEntrySol           Float                  @default(0.3) @map("dip_entry_sol")
+  dipTakeProfitUsd      Float                  @default(4.0) @map("dip_take_profit_usd")
+  dipTakeProfitMaxUsd   Float                  @default(5.0) @map("dip_take_profit_max_usd")
+  dipStopLossPercent    Float                  @default(30.0) @map("dip_stop_loss_percent")
+  dipTrailingStopPercent Float                 @default(0) @map("dip_trailing_stop_percent")
+  dipMaxOpenPositions   Int                    @default(3) @map("dip_max_open_positions")
+  dipRsiPeriod          Int                    @default(14) @map("dip_rsi_period")
+  dipRsiTimeframe       String                 @default("15m") @map("dip_rsi_timeframe")
+  dipRsiOversold        Float                  @default(35.0) @map("dip_rsi_oversold")
+  dipRsiMax             Float                  @default(50.0) @map("dip_rsi_max")
+  dipMinLiquidityUsd    Float                  @default(50000.0) @map("dip_min_liquidity_usd")
+  dipMinVolume24hUsd    Float                  @default(150000.0) @map("dip_min_volume24h_usd")
+  dipMinTokenAgeHours   Float                  @default(24.0) @map("dip_min_token_age_hours")
+  /// A coin down more than this over 24h is not dipping, it is bleeding out
+  dipMaxDrawdown24hPct  Float                  @default(45.0) @map("dip_max_drawdown_24h_pct")
+  dipMinBuySellRatio    Float                  @default(1.0) @map("dip_min_buy_sell_ratio")
+  dipMinNarrativeScore  Float                  @default(45.0) @map("dip_min_narrative_score")
+  dipScoringThreshold   Float                  @default(70.0) @map("dip_scoring_threshold")
+  /// Tighter than the global limit: a few dollars of profit does not survive a 5% exit impact
+  dipMaxPriceImpactPct  Float                  @default(1.5) @map("dip_max_price_impact_pct")
+  dipCooldownMinutes    Int                    @default(120) @map("dip_cooldown_minutes")
+  /// Extra narrative keywords you are tracking, comma-separated
+  dipNarrativeKeywords  String                 @default("") @map("dip_narrative_keywords")
 
   autoScanIntervalSec   Int                    @default(10) @map("auto_scan_interval_sec")
   autoDiscoveryEnabled  Boolean                @default(true) @map("auto_discovery_enabled")

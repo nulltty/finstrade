@@ -1,5 +1,5 @@
 import { Worker, Job } from 'bullmq';
-import { redisConnection, positionMonitorQueue, multiWalletScannerQueue, whaleDiscoveryQueue } from './queue.js';
+import { redisConnection, positionMonitorQueue, multiWalletScannerQueue, whaleDiscoveryQueue, dipScannerQueue } from './queue.js';
 import { tokenDataAggregator } from '../services/aggregator.js';
 import { scoringEngine } from '../services/scoring.js';
 import { telegramBot } from '../bot/telegram.js';
@@ -70,7 +70,19 @@ export async function scheduleJobs(settings?: BotSettingsData) {
   } else {
     await whaleDiscoveryQueue.removeJobScheduler('auto-discover-whales');
   }
-  logger.info({ scanSec: s.autoScanIntervalSec, discoveryMin: s.autoDiscoveryEnabled ? s.autoDiscoveryIntervalMin : 'off' }, 'Job schedules applied');
+  if (s.dipStrategyEnabled) {
+    await dipScannerQueue.upsertJobScheduler('scan-dips', { every: Math.max(2, s.dipScanIntervalMin) * 60 * 1000 });
+  } else {
+    await dipScannerQueue.removeJobScheduler('scan-dips');
+  }
+  logger.info(
+    {
+      scanSec: s.autoScanIntervalSec,
+      discoveryMin: s.autoDiscoveryEnabled ? s.autoDiscoveryIntervalMin : 'off',
+      dipScanMin: s.dipStrategyEnabled ? s.dipScanIntervalMin : 'off',
+    },
+    'Job schedules applied'
+  );
 }
 
 export function startWorkers() {
@@ -154,6 +166,16 @@ export function startWorkers() {
     { connection: redisConnection, lockDuration: 15 * 60 * 1000 }
   );
 
+  // 6. RSI Dip Reversal Scanner (strategy 2; candle fetches make a cycle slow, hence its own queue)
+  const dipScannerWorker = new Worker(
+    'dip-scanner',
+    async () => {
+      const { dipReversalScanner } = await import('../services/dipScanner.js');
+      return trackRun('dipScanner', () => dipReversalScanner.runScanCycle() as any);
+    },
+    { connection: redisConnection, lockDuration: 10 * 60 * 1000 }
+  );
+
   scheduleJobs().catch((err) => logger.error({ err }, 'Failed to schedule repeatable jobs'));
   settingsService.onChange((s) => {
     scheduleJobs(s).catch((err) => logger.error({ err }, 'Failed to reschedule jobs'));
@@ -167,6 +189,7 @@ export function startWorkers() {
   monitorWorker.on('failed', (job, err) => logger.error({ jobId: job?.id, err: err?.message }, 'Monitor worker failed'));
   scannerWorker.on('failed', (job, err) => logger.error({ jobId: job?.id, err: err?.message }, 'Scanner worker failed'));
   discoveryWorker.on('failed', (job, err) => logger.error({ jobId: job?.id, err: err?.message }, 'Discovery worker failed'));
+  dipScannerWorker.on('failed', (job, err) => logger.error({ jobId: job?.id, err: err?.message }, 'Dip scanner worker failed'));
 
-  return { signalWorker, timeoutWorker, monitorWorker, scannerWorker, discoveryWorker };
+  return { signalWorker, timeoutWorker, monitorWorker, scannerWorker, discoveryWorker, dipScannerWorker };
 }

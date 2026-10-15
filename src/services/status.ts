@@ -14,11 +14,12 @@ export const systemStatus = {
   startedAt: Date.now(),
   scanner: beat(),
   discovery: beat(),
+  dipScanner: beat(),
   monitor: beat(),
   pipeline: beat(),
 };
 
-export type EngineName = 'scanner' | 'discovery' | 'monitor' | 'pipeline';
+export type EngineName = 'scanner' | 'discovery' | 'dipScanner' | 'monitor' | 'pipeline';
 
 export async function trackRun<T extends Record<string, any> | void>(engine: EngineName, fn: () => Promise<T>): Promise<T> {
   const b = systemStatus[engine];

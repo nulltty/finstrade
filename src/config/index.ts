@@ -41,6 +41,8 @@ const envSchema = z.object({
   BIRDEYE_API_KEY: z.string().optional().default(''),
   BIRDEYE_API_BASE: z.string().default('https://public-api.birdeye.so'),
   RUGCHECK_API_BASE: z.string().default('https://api.rugcheck.xyz'),
+  // Free, keyless OHLCV (candles) per pool — the RSI dip strategy's primary candle source
+  GECKOTERMINAL_API_BASE: z.string().default('https://api.geckoterminal.com/api/v2'),
   JUPITER_API_BASE: z.string().default('https://lite-api.jup.ag'),
   JUPITER_API_KEY: z.string().optional().default(''),
 

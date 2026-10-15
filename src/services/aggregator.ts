@@ -39,6 +39,10 @@ export interface AggregatedTokenMetrics {
   priceChange?: { m5?: number; h1?: number; h6?: number; h24?: number };
   txns1h?: { buys: number; sells: number };
   launchpad?: string | null;
+  /** Social platform types listed on the pair (twitter, telegram…) — input for the narrative check */
+  socials?: string[];
+  websites?: number;
+  boosts?: number;
   dataSources?: { dexscreener: boolean; goplus: boolean; rugcheck: boolean; jupiter: boolean };
 }
 
@@ -88,13 +92,18 @@ export class TokenDataAggregator {
     return metrics;
   }
 
-  async collect(tokenAddress: string, chain: string): Promise<AggregatedTokenMetrics> {
+  /**
+   * @param opts.tradeSizeUsd Size the sell simulation and price impact are measured for. Each
+   * strategy enters with its own size, and price impact is meaningless unless it is measured
+   * for the order we are actually about to send.
+   */
+  async collect(tokenAddress: string, chain: string, opts: { tradeSizeUsd?: number } = {}): Promise<AggregatedTokenMetrics> {
     const isSolana = chain === 'solana';
     const [dex, goplus, rug, route] = await Promise.all([
       this.fetchDexScreenerData(tokenAddress, chain),
       this.fetchGoPlusSecurity(tokenAddress, chain),
       isSolana ? this.fetchRugCheck(tokenAddress) : Promise.resolve(null),
-      isSolana ? this.checkSellability(tokenAddress) : Promise.resolve(null),
+      isSolana ? this.checkSellability(tokenAddress, opts.tradeSizeUsd) : Promise.resolve(null),
     ]);
 
     const riskFlags: string[] = [...(goplus?.riskFlags || []), ...(rug?.riskFlags || [])];
@@ -149,6 +158,9 @@ export class TokenDataAggregator {
       priceChange: dex.priceChange,
       txns1h: dex.txns1h,
       launchpad: rug?.launchpad ?? null,
+      socials: dex.socials,
+      websites: dex.websites,
+      boosts: dex.boosts,
       dataSources: { dexscreener: dex.ok, goplus: !!goplus, rugcheck: !!rug, jupiter: route?.ok ?? false },
     };
   }
@@ -178,7 +190,69 @@ export class TokenDataAggregator {
       dexId: pair.dexId as string,
       priceChange: pair.priceChange || {},
       txns1h: { buys: pair.txns?.h1?.buys || 0, sells: pair.txns?.h1?.sells || 0 },
+      socials: ((pair.info?.socials || []) as any[]).map((x) => String(x?.type || '')).filter(Boolean),
+      websites: ((pair.info?.websites || []) as any[]).length,
+      boosts: pair.boosts?.active || 0,
     };
+  }
+
+  /**
+   * Mints being promoted or traded heavily on Solana right now — the shared starting universe
+   * for whale discovery (whose holders do we profile?) and for the dip scanner (which coins do
+   * we look for a pullback in?). Descriptions come free with DexScreener's token profiles and
+   * feed the narrative check.
+   */
+  async fetchTrendingMints(max = 60): Promise<{ mints: string[]; descriptions: Map<string, string> }> {
+    const [boostTop, boostLatest, profiles, birdeye] = await Promise.all([
+      getJson(`${env.DEXSCREENER_API_BASE}/token-boosts/top/v1`),
+      getJson(`${env.DEXSCREENER_API_BASE}/token-boosts/latest/v1`),
+      getJson(`${env.DEXSCREENER_API_BASE}/token-profiles/latest/v1`),
+      this.fetchBirdeyeTrendingMints(),
+    ]);
+
+    const descriptions = new Map<string, string>();
+    const mints: string[] = [...birdeye];
+    for (const src of [boostTop, boostLatest, profiles]) {
+      for (const t of Array.isArray(src) ? src : []) {
+        if (t?.chainId !== 'solana' || !t?.tokenAddress) continue;
+        mints.push(t.tokenAddress as string);
+        if (typeof t.description === 'string' && t.description.trim()) descriptions.set(t.tokenAddress, t.description);
+      }
+    }
+    return { mints: [...new Set(mints)].slice(0, max), descriptions };
+  }
+
+  /** Trending Solana tokens by 24h volume from Birdeye (free tier); empty without a key */
+  async fetchBirdeyeTrendingMints(): Promise<string[]> {
+    if (!env.BIRDEYE_API_KEY) return [];
+    const url = `${env.BIRDEYE_API_BASE}/defi/token_trending?sort_by=volume24hUSD&sort_type=desc&offset=0&limit=20`;
+    try {
+      const res = await fetch(url, {
+        headers: { accept: 'application/json', 'x-chain': 'solana', 'X-API-KEY': env.BIRDEYE_API_KEY },
+        signal: AbortSignal.timeout(8000),
+      });
+      if (res.status === 429) recordApiEvent('birdeye', '429', 'token_trending');
+      if (!res.ok) return [];
+      const json = (await res.json()) as any;
+      return ((json?.data?.tokens || []) as any[]).map((t) => t.address).filter(Boolean);
+    } catch (err: any) {
+      if (isTimeoutError(err)) recordApiEvent('birdeye', 'timeout', 'token_trending');
+      return [];
+    }
+  }
+
+  /** Deepest pair per mint, batched 30 at a time as the DexScreener endpoint allows */
+  async fetchPairsForMints(mints: string[]): Promise<Map<string, any>> {
+    const best = new Map<string, any>();
+    for (let i = 0; i < mints.length; i += 30) {
+      const pairs = await getJson(`${env.DEXSCREENER_API_BASE}/tokens/v1/solana/${mints.slice(i, i + 30).join(',')}`);
+      for (const p of Array.isArray(pairs) ? pairs : []) {
+        const mint = p.baseToken?.address;
+        if (!mint) continue;
+        if (!best.has(mint) || (p.liquidity?.usd || 0) > (best.get(mint).liquidity?.usd || 0)) best.set(mint, p);
+      }
+    }
+    return best;
   }
 
   /** Batch USD prices for up to 30 Solana mints in one DexScreener call */
@@ -306,12 +380,13 @@ export class TokenDataAggregator {
    * Simulate the trade on Jupiter: buy with our position size, then quote selling
    * the received tokens back. No sell route or a big round-trip loss = honeypot / tax.
    */
-  async checkSellability(mint: string) {
+  async checkSellability(mint: string, tradeSizeUsd?: number) {
     const settings = await settingsService.getSettings();
     const solPrice = await getSolPriceUsd();
     if (solPrice <= 0) return { ok: false, sellRouteOk: null, roundTripLossPct: null, buyPriceImpactPct: null };
 
-    const lamports = BigInt(Math.max(1_000_000, Math.round((settings.tradeAmountUsd / solPrice) * 1e9)));
+    const sizeUsd = tradeSizeUsd && tradeSizeUsd > 0 ? tradeSizeUsd : settings.tradeAmountUsd;
+    const lamports = BigInt(Math.max(1_000_000, Math.round((sizeUsd / solPrice) * 1e9)));
     const buy = await getJupiterQuote(WSOL_MINT, mint, lamports, settings.slippageBps);
     if (!buy) return { ok: false, sellRouteOk: null, roundTripLossPct: null, buyPriceImpactPct: null };
 
@@ -338,6 +413,9 @@ export class TokenDataAggregator {
       dexId: undefined as string | undefined,
       priceChange: {},
       txns1h: { buys: 0, sells: 0 },
+      socials: [] as string[],
+      websites: 0,
+      boosts: 0,
     };
   }
 }

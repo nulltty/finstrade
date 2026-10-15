@@ -15,7 +15,7 @@ import { getTradingKeypair, getSolBalance, getSolPriceUsd, getUsdToIdrRate, norm
 import { multiWalletScanner } from '../services/scanner.js';
 import { getApiHealthSummary } from '../services/apiHealth.js';
 import { createSessionToken, verifySessionToken, parseCookies, SESSION_COOKIE_NAME } from '../services/session.js';
-import { multiWalletScannerQueue, signalQueue, whaleDiscoveryQueue } from '../workers/queue.js';
+import { multiWalletScannerQueue, signalQueue, whaleDiscoveryQueue, dipScannerQueue } from '../workers/queue.js';
 import { env, solanaRpcUrl } from '../config/index.js';
 import { logger } from '../services/logger.js';
 
@@ -120,7 +120,7 @@ export function createServer() {
       Promise.resolve(settingsPreview),
       walletSnapshot(),
       prisma.position.findMany({ where: { status: { in: ['open', 'closing'] }, ...modeFilter } }),
-      prisma.position.findMany({ where: { status: 'closed', ...modeFilter }, select: { pnlPercent: true, costUsd: true, proceedsUsd: true, entryAmount: true, entryPrice: true, exitPrice: true, openedAt: true, closedAt: true, exitReason: true } }),
+      prisma.position.findMany({ where: { status: 'closed', ...modeFilter }, select: { pnlPercent: true, costUsd: true, proceedsUsd: true, entryAmount: true, entryPrice: true, exitPrice: true, openedAt: true, closedAt: true, exitReason: true, strategy: true } }),
       prisma.signal.count({ where: { createdAt: { gte: since24h } } }),
       prisma.signal.groupBy({ by: ['status'], _count: { _all: true }, where: { createdAt: { gte: since24h } } }),
       prisma.watchedWallet.groupBy({ by: ['profileStatus'], _count: { _all: true } }),
@@ -138,6 +138,18 @@ export function createServer() {
     const openCostUsd = open.reduce((a, p) => a + (p.costUsd || p.entryAmount * p.entryPrice), 0);
     const exitReasons: Record<string, number> = {};
     for (const p of closed) exitReasons[p.exitReason || 'unknown'] = (exitReasons[p.exitReason || 'unknown'] || 0) + 1;
+
+    // Each strategy is judged on its own record: a profitable whale pipeline must not hide a
+    // losing dip scanner (or the other way round).
+    const byStrategy: Record<string, { open: number; closed: number; wins: number; realizedPnlUsd: number }> = {};
+    const strategyRow = (key: string) => (byStrategy[key] ||= { open: 0, closed: 0, wins: 0, realizedPnlUsd: 0 });
+    for (const p of open) strategyRow(p.strategy).open++;
+    for (const p of closed) {
+      const row = strategyRow(p.strategy);
+      row.closed++;
+      if (p.pnlPercent > 0) row.wins++;
+      row.realizedPnlUsd += pnlUsdOf(p);
+    }
     // In paper mode the real wallet is not what the run is being judged on, and showing its
     // balance next to simulated PnL invites reading one as the other. Report simulated equity
     // instead — starting cash plus realised PnL plus what the open paper positions are worth —
@@ -191,6 +203,7 @@ export function createServer() {
         signals24h,
         spent24h: spent24h._sum.totalUsd || 0,
         exitReasons,
+        byStrategy,
       },
       funnel24h: Object.fromEntries(statusGroups.map((g) => [g.status, g._count._all])),
       whales: {
@@ -332,6 +345,14 @@ export function createServer() {
 
   app.post('/api/wallets/scan-now', h(async (_req, res) => {
     await multiWalletScannerQueue.add('scan-active-whales', {}, { jobId: `scan-manual-${Date.now()}` });
+    res.json({ success: true, queued: true });
+  }));
+
+  // ── Strategy 2: RSI dip reversal ────────────────────────────────────────
+  app.post('/api/dip/scan-now', h(async (_req, res) => {
+    const settings = await settingsService.getSettings();
+    if (!settings.dipStrategyEnabled) return res.status(400).json({ error: 'dip strategy is disabled — enable it in Settings first' });
+    await dipScannerQueue.add('scan-dips', {}, { jobId: `dip-manual-${Date.now()}` });
     res.json({ success: true, queued: true });
   }));
 

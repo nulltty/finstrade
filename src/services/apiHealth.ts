@@ -35,6 +35,7 @@ export function providerFromUrl(url: string): string {
   if (url.includes('gopluslabs')) return 'goplus';
   if (url.includes('rugcheck')) return 'rugcheck';
   if (url.includes('birdeye')) return 'birdeye';
+  if (url.includes('geckoterminal')) return 'geckoterminal';
   if (url.includes('jup-ag') || url.includes('jupiter')) return 'jupiter';
   return 'other';
 }

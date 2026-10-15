@@ -1,5 +1,6 @@
 import { prisma } from '../db/prisma.js';
 import { env } from '../config/index.js';
+import { tokenDataAggregator } from './aggregator.js';
 import { walletProfiler } from './walletProfiler.js';
 import { rpc } from './solana.js';
 import { audit } from './audit.js';
@@ -61,28 +62,6 @@ async function getJson(url: string, timeoutMs = 8000): Promise<any | null> {
   }
 }
 
-/**
- * Trending Solana tokens by 24h volume from Birdeye — a free-tier "token list" endpoint,
- * used purely to widen the whale-discovery net alongside DexScreener's boosts/profiles.
- */
-async function getBirdeyeTrendingMints(): Promise<string[]> {
-  if (!env.BIRDEYE_API_KEY) return [];
-  const url = `${env.BIRDEYE_API_BASE}/defi/token_trending?sort_by=volume24hUSD&sort_type=desc&offset=0&limit=20`;
-  try {
-    const res = await fetch(url, {
-      headers: { accept: 'application/json', 'x-chain': 'solana', 'X-API-KEY': env.BIRDEYE_API_KEY },
-      signal: AbortSignal.timeout(8000),
-    });
-    if (res.status === 429) recordApiEvent('birdeye', '429', 'token_trending');
-    if (!res.ok) return [];
-    const json = (await res.json()) as any;
-    return (json?.data?.tokens || []).map((t: any) => t.address).filter(Boolean);
-  } catch (err: any) {
-    if (isTimeoutError(err)) recordApiEvent('birdeye', 'timeout', 'token_trending');
-    return [];
-  }
-}
-
 export class WhaleDiscoveryService {
   private running = false;
 
@@ -127,39 +106,14 @@ export class WhaleDiscoveryService {
    * filtered to real winners with liquidity and volume.
    */
   async findWinningTokens(): Promise<Array<{ mint: string; symbol: string; pairAddress: string; change24h: number }>> {
-    const [sources, birdeyeMints] = await Promise.all([
-      Promise.all([
-        getJson(`${env.DEXSCREENER_API_BASE}/token-boosts/top/v1`),
-        getJson(`${env.DEXSCREENER_API_BASE}/token-boosts/latest/v1`),
-        getJson(`${env.DEXSCREENER_API_BASE}/token-profiles/latest/v1`),
-      ]),
-      getBirdeyeTrendingMints(),
-    ]);
-    const mints = [
-      ...new Set([
-        ...birdeyeMints,
-        ...sources
-          .flatMap((s) => (Array.isArray(s) ? s : []))
-          .filter((t: any) => t.chainId === 'solana' && t.tokenAddress)
-          .map((t: any) => t.tokenAddress as string),
-      ]),
-    ].slice(0, 60);
+    const { mints } = await tokenDataAggregator.fetchTrendingMints(60);
+    const best = await tokenDataAggregator.fetchPairsForMints(mints);
 
     const winners: Array<{ mint: string; symbol: string; pairAddress: string; change24h: number }> = [];
-    for (let i = 0; i < mints.length; i += 30) {
-      const pairs = await getJson(`${env.DEXSCREENER_API_BASE}/tokens/v1/solana/${mints.slice(i, i + 30).join(',')}`);
-      if (!Array.isArray(pairs)) continue;
-      const best = new Map<string, any>();
-      for (const p of pairs) {
-        const mint = p.baseToken?.address;
-        if (!mint) continue;
-        if (!best.has(mint) || (p.liquidity?.usd || 0) > (best.get(mint).liquidity?.usd || 0)) best.set(mint, p);
-      }
-      for (const [mint, p] of best) {
-        const change = Number(p.priceChange?.h24 ?? 0);
-        if (change >= 30 && (p.liquidity?.usd || 0) >= 20000 && (p.volume?.h24 || 0) >= 50000) {
-          winners.push({ mint, symbol: p.baseToken?.symbol || '?', pairAddress: p.pairAddress, change24h: change });
-        }
+    for (const [mint, p] of best) {
+      const change = Number(p.priceChange?.h24 ?? 0);
+      if (change >= 30 && (p.liquidity?.usd || 0) >= 20000 && (p.volume?.h24 || 0) >= 50000) {
+        winners.push({ mint, symbol: p.baseToken?.symbol || '?', pairAddress: p.pairAddress, change24h: change });
       }
     }
     return winners.sort((a, b) => b.change24h - a.change24h).slice(0, MAX_WINNERS_PER_RUN);

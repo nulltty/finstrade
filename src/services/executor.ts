@@ -41,11 +41,56 @@ export type ExitReason =
   | 'stop_loss'
   | 'trailing_stop'
   | 'take_profit_auto'
+  | 'take_profit_usd'
   | 'take_profit_approved'
   | 'take_profit_timeout'
   | 'whale_exit'
   | 'liquidity_gone'
   | 'manual';
+
+/**
+ * How one strategy's entry differs from another's: size, exit targets and its own slot cap.
+ * Derived from the signal's `source`, so every path into executeBuy (autopilot, Telegram
+ * approval, cockpit approval) applies the same plan without having to pass it around.
+ */
+export interface EntryPlan {
+  strategy: string;
+  /** Fixed SOL per entry; null = use the global USD / %-of-balance sizing settings */
+  sizeSol: number | null;
+  /** Absolute-USD take profit (and the stretch target it may ride to) instead of a % ladder */
+  tpUsdTarget: number | null;
+  tpUsdStretch: number | null;
+  slPercentOverride: number | null;
+  trailPercentOverride: number | null;
+  /** Slot cap counted against this strategy alone, on top of the global maxOpenPositions */
+  maxOpenForStrategy: number | null;
+  maxPriceImpactPct: number;
+}
+
+export function entryPlanFor(source: string | null | undefined, settings: BotSettingsData): EntryPlan {
+  if (source === 'dip_reversal') {
+    return {
+      strategy: 'dip_reversal',
+      sizeSol: settings.dipEntrySol,
+      tpUsdTarget: settings.dipTakeProfitUsd,
+      tpUsdStretch: Math.max(settings.dipTakeProfitMaxUsd, settings.dipTakeProfitUsd),
+      slPercentOverride: settings.dipStopLossPercent,
+      trailPercentOverride: settings.dipTrailingStopPercent,
+      maxOpenForStrategy: settings.dipMaxOpenPositions,
+      maxPriceImpactPct: settings.dipMaxPriceImpactPct,
+    };
+  }
+  return {
+    strategy: 'whale_copy',
+    sizeSol: null,
+    tpUsdTarget: null,
+    tpUsdStretch: null,
+    slPercentOverride: null,
+    trailPercentOverride: null,
+    maxOpenForStrategy: null,
+    maxPriceImpactPct: settings.maxPriceImpactPct,
+  };
+}
 
 const FEE_BUFFER_SOL = 0.01; // ATA rent + priority fee headroom per swap
 const MAX_SWAP_ATTEMPTS = 3; // a blockhash-expired swap is provably dead — safe to retry with a fresh one
@@ -60,7 +105,7 @@ const BASE_FEE_SOL = 0.000005; // signature fee
 const ATA_RENT_SOL = 0.00203928; // rent for the token account a first buy has to create
 
 /** Per-swap cost a paper fill must carry so its PnL is comparable to a live one */
-function swapCostSol(settings: BotSettingsData, opensAta: boolean) {
+export function swapCostSol(settings: BotSettingsData, opensAta: boolean) {
   return settings.maxPriorityFee + BASE_FEE_SOL + (opensAta ? ATA_RENT_SOL : 0);
 }
 
@@ -92,12 +137,24 @@ export class TradeExecutor {
   }
 
   /** Risk gates that apply before every BUY, auto or approved */
-  async preBuyChecks(tokenAddress: string, settings: BotSettingsData): Promise<string | null> {
+  async preBuyChecks(tokenAddress: string, settings: BotSettingsData, plan?: EntryPlan): Promise<string | null> {
+    const entry = plan || entryPlanFor('whale_copy', settings);
     const cb = await circuitBreaker.canExecuteBuy();
     if (!cb.allowed) return cb.reason || 'circuit breaker';
 
     const open = await prisma.position.count({ where: { status: { in: ['open', 'closing'] } } });
     if (open >= settings.maxOpenPositions) return `max open positions reached (${open}/${settings.maxOpenPositions})`;
+
+    // A second strategy must not be able to fill every slot the first one needs, so each one
+    // also carries its own cap.
+    if (entry.maxOpenForStrategy != null) {
+      const openForStrategy = await prisma.position.count({
+        where: { status: { in: ['open', 'closing'] }, strategy: entry.strategy },
+      });
+      if (openForStrategy >= entry.maxOpenForStrategy) {
+        return `max ${entry.strategy} positions reached (${openForStrategy}/${entry.maxOpenForStrategy})`;
+      }
+    }
 
     const dup = await prisma.position.findFirst({ where: { tokenAddress, status: { in: ['open', 'closing'] } } });
     if (dup) return 'already holding this token';
@@ -108,33 +165,71 @@ export class TradeExecutor {
       _sum: { totalUsd: true },
       where: { side: 'BUY', isPaper: false, createdAt: { gte: since } },
     });
-    if ((spent._sum.totalUsd || 0) + settings.tradeAmountUsd > settings.maxDailySpendUsd) {
+    const plannedUsd = await this.plannedSpendUsd(settings, entry);
+    if ((spent._sum.totalUsd || 0) + plannedUsd > settings.maxDailySpendUsd) {
       return `daily spend cap reached ($${(spent._sum.totalUsd || 0).toFixed(0)} / $${settings.maxDailySpendUsd})`;
     }
     return null;
   }
 
-  /** USD size for the next position, honouring balance and SOL reserve in live mode */
-  async resolvePositionSizeUsd(settings: BotSettingsData, isPaper: boolean): Promise<{ usd: number; error?: string }> {
-    if (isPaper && settings.positionSizeMode !== 'percent_balance') return { usd: settings.tradeAmountUsd };
-
-    const kp = await getTradingKeypair();
+  /** What this entry is expected to cost in USD, for the 24h spend cap */
+  private async plannedSpendUsd(settings: BotSettingsData, plan: EntryPlan): Promise<number> {
+    if (plan.sizeSol == null) return settings.tradeAmountUsd;
     const solPrice = await getSolPriceUsd();
-    const balance = kp ? await getSolBalance(kp.publicKey.toBase58()) : null;
-    if (balance === null || solPrice <= 0) {
-      return isPaper ? { usd: settings.tradeAmountUsd } : { usd: 0, error: 'cannot read wallet balance / SOL price' };
+    return solPrice > 0 ? plan.sizeSol * solPrice : settings.tradeAmountUsd;
+  }
+
+  /**
+   * Size for the next position, in lamports (what the swap actually sends) and USD (what the
+   * caps and the record are denominated in), honouring balance and SOL reserve in live mode.
+   */
+  async resolveEntrySize(
+    settings: BotSettingsData,
+    isPaper: boolean,
+    plan: EntryPlan
+  ): Promise<{ lamports: bigint; usd: number; error?: string }> {
+    const solPrice = await getSolPriceUsd();
+    if (solPrice <= 0) return { lamports: 0n, usd: 0, error: 'SOL price unavailable' };
+    const fail = (error: string) => ({ lamports: 0n, usd: 0, error });
+    const sized = (sol: number) => ({ lamports: BigInt(Math.floor(sol * LAMPORTS_PER_SOL)), usd: sol * solPrice });
+    const walletBalance = async () => {
+      const kp = await getTradingKeypair();
+      return kp ? getSolBalance(kp.publicKey.toBase58()) : null;
+    };
+
+    // A fixed-SOL entry is never silently shrunk: its USD profit target is sized against the
+    // full entry, so a smaller fill would be chasing a target it can no longer reach.
+    if (plan.sizeSol != null) {
+      if (!(plan.sizeSol > 0)) return fail('entry size must be greater than 0 SOL');
+      if (isPaper) return sized(plan.sizeSol);
+      const balance = await walletBalance();
+      if (balance === null) return fail('cannot read wallet balance');
+      const spendable = balance - settings.solReserve - FEE_BUFFER_SOL;
+      if (spendable < plan.sizeSol) {
+        return fail(
+          `insufficient balance for a ${plan.sizeSol} SOL entry (${balance.toFixed(4)} SOL, reserve ${settings.solReserve} SOL)`
+        );
+      }
+      return sized(plan.sizeSol);
+    }
+
+    if (isPaper && settings.positionSizeMode !== 'percent_balance') return sized(settings.tradeAmountUsd / solPrice);
+
+    const balance = await walletBalance();
+    if (balance === null) {
+      return isPaper ? sized(settings.tradeAmountUsd / solPrice) : fail('cannot read wallet balance / SOL price');
     }
 
     const spendableSol = Math.max(0, balance - settings.solReserve - FEE_BUFFER_SOL);
-    let usd = settings.positionSizeMode === 'percent_balance'
-      ? (balance * solPrice * settings.positionSizePercent) / 100
-      : settings.tradeAmountUsd;
-    usd = Math.min(usd, spendableSol * solPrice);
+    let sol = settings.positionSizeMode === 'percent_balance'
+      ? (balance * settings.positionSizePercent) / 100
+      : settings.tradeAmountUsd / solPrice;
+    sol = Math.min(sol, spendableSol);
 
-    if (!isPaper && usd < 1) {
-      return { usd: 0, error: `insufficient balance (${balance.toFixed(4)} SOL, reserve ${settings.solReserve} SOL)` };
+    if (!isPaper && sol * solPrice < 1) {
+      return fail(`insufficient balance (${balance.toFixed(4)} SOL, reserve ${settings.solReserve} SOL)`);
     }
-    return { usd: usd > 0 ? usd : settings.tradeAmountUsd };
+    return sized(sol > 0 ? sol : settings.tradeAmountUsd / solPrice);
   }
 
   /**
@@ -147,7 +242,8 @@ export class TradeExecutor {
     }
 
     const settings = await settingsService.getSettings();
-    const blocked = await this.preBuyChecks(signal.tokenAddress, settings);
+    const plan = entryPlanFor(signal.source, settings);
+    const blocked = await this.preBuyChecks(signal.tokenAddress, settings, plan);
     if (blocked) {
       logger.warn({ signalId, reason: blocked }, 'BUY blocked by risk gate');
       await prisma.signal.update({ where: { id: signalId }, data: { status: 'failed', decision: `rejected:${blocked}` } });
@@ -172,17 +268,17 @@ export class TradeExecutor {
       let txHash: string;
 
       if (isPaper) {
-        const size = await this.resolvePositionSizeUsd(settings, true);
+        const size = await this.resolveEntrySize(settings, true, plan);
         if (size.error) throw new Error(size.error);
         if (solPrice <= 0) throw new Error('SOL price unavailable');
-        const paper = await this.paperBuy(signal.tokenAddress, size.usd, settings, solPrice);
+        const paper = await this.paperBuy(signal.tokenAddress, size.lamports, settings, solPrice, plan);
         ({ txHash, tokenAmount, rawAmount, decimals, costSol, costUsd, entryPrice } = paper);
       } else {
         // Size and swap under one lock so the balance read can't go stale in between
         const live = await withLiveBuyLock(async () => {
-          const size = await this.resolvePositionSizeUsd(settings, false);
+          const size = await this.resolveEntrySize(settings, false, plan);
           if (size.error) throw new Error(size.error);
-          return this.liveBuy(signal.tokenAddress, size.usd, settings);
+          return this.liveBuy(signal.tokenAddress, size.lamports, settings, plan);
         });
         ({ txHash, tokenAmount, rawAmount, decimals, costSol } = live);
         costUsd = costSol * solPrice;
@@ -192,6 +288,7 @@ export class TradeExecutor {
       const position = await prisma.position.create({
         data: {
           signalId: signal.id,
+          strategy: plan.strategy,
           chain: signal.chain,
           tokenAddress: signal.tokenAddress,
           tokenSymbol: signal.tokenSymbol || 'TOKEN',
@@ -206,7 +303,13 @@ export class TradeExecutor {
           pnlPercent: 0,
           highestPnlPercent: 0,
           nextTpThreshold: settings.takeProfitPercent,
-          whaleWallet: signal.wallet,
+          tpUsdTarget: plan.tpUsdTarget,
+          tpUsdStretch: plan.tpUsdStretch,
+          slPercentOverride: plan.slPercentOverride,
+          trailPercentOverride: plan.trailPercentOverride,
+          // Only a copy-trade has a whale behind it; for a scanner signal the field would
+          // otherwise point at a pseudo-wallet that no profiler can ever explain.
+          whaleWallet: plan.strategy === 'whale_copy' ? signal.wallet : null,
           isPaper,
           status: 'open',
         },
@@ -233,9 +336,10 @@ export class TradeExecutor {
 
       await prisma.signal.update({ where: { id: signalId }, data: { status: 'bought' } });
 
-      await audit('BUY_FILLED', `Position opened via ${isPaper ? 'Paper' : 'Live'} order`, {
+      await audit('BUY_FILLED', `Position opened via ${isPaper ? 'Paper' : 'Live'} order (${plan.strategy})`, {
         positionId: position.id,
         signalId,
+        strategy: plan.strategy,
         txHash,
         costUsd,
         costSol,
@@ -380,12 +484,11 @@ export class TradeExecutor {
    * the ones a live order would have met, and it refuses on the same gates. Only the signed
    * transaction is skipped, so paper results stay comparable to live instead of flattering it.
    */
-  private async paperBuy(mint: string, amountUsd: number, settings: BotSettingsData, solPrice: number) {
-    const lamports = BigInt(Math.floor((amountUsd / solPrice) * LAMPORTS_PER_SOL));
+  private async paperBuy(mint: string, lamports: bigint, settings: BotSettingsData, solPrice: number, plan: EntryPlan) {
     const quote = await getJupiterQuote(WSOL_MINT, mint, lamports, settings.slippageBps);
     if (!quote) throw new Error('No Jupiter route for buy');
     const impact = Number(quote.priceImpactPct || 0) * 100;
-    if (impact > settings.maxPriceImpactPct) throw new Error(`Price impact ${impact.toFixed(1)}% exceeds limit`);
+    if (impact > plan.maxPriceImpactPct) throw new Error(`Price impact ${impact.toFixed(1)}% exceeds limit`);
 
     const decimals = await getMintDecimals(mint);
     if (decimals === null) throw new Error('Cannot read token decimals');
@@ -433,21 +536,17 @@ export class TradeExecutor {
     };
   }
 
-  private async liveBuy(mint: string, amountUsd: number, settings: BotSettingsData) {
+  private async liveBuy(mint: string, lamports: bigint, settings: BotSettingsData, plan: EntryPlan) {
     const kp = await getTradingKeypair();
     if (!kp) throw new Error('No trading wallet key');
-    const solPrice = await getSolPriceUsd();
-    if (solPrice <= 0) throw new Error('SOL price unavailable');
-
     const owner = kp.publicKey.toBase58();
-    const lamports = BigInt(Math.floor((amountUsd / solPrice) * LAMPORTS_PER_SOL));
 
     let lastErr: any;
     for (let attempt = 1; attempt <= MAX_SWAP_ATTEMPTS; attempt++) {
       const quote = await getJupiterQuote(WSOL_MINT, mint, lamports, settings.slippageBps);
       if (!quote) throw new Error('No Jupiter route for buy');
       const impact = Number(quote.priceImpactPct || 0) * 100;
-      if (impact > settings.maxPriceImpactPct) throw new Error(`Price impact ${impact.toFixed(1)}% exceeds limit`);
+      if (impact > plan.maxPriceImpactPct) throw new Error(`Price impact ${impact.toFixed(1)}% exceeds limit`);
 
       logger.info({ mint, attempt, lamports: lamports.toString(), outAmount: quote.outAmount }, 'Sending live Jupiter BUY');
       try {

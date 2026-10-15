@@ -12,6 +12,7 @@ Semua layanan pihak ke-3 yang dipakai bot ini **gratis dan tanpa langganan**. Se
 | **GoPlus Security** | Cek kontrak: mint, freeze, honeypot, transfer fee | Gratis | ❌ Tidak |
 | **RugCheck** | LP lock/burn, top holder, insider, status rug | Gratis | ❌ Tidak |
 | **Jupiter** | Simulasi jual (deteksi honeypot) + eksekusi swap | Gratis | ❌ Tidak |
+| **GeckoTerminal** | Candle OHLCV untuk RSI (strategy 2 — dip reversal) | Gratis | ❌ Tidak |
 | **Solana RPC publik** | Baca transaksi whale & saldo wallet | Gratis | ❌ Tidak |
 | **Telegram Bot** | Notifikasi & tombol approve | Gratis | ✅ Buat bot di @BotFather (gratis, 2 menit) |
 | **Helius** *(opsional, sangat disarankan)* | RPC Solana yang jauh lebih cepat | Free plan | ✅ Akun gratis → API key |
@@ -259,6 +260,7 @@ npm run wallet
 - [ ] Telegram terhubung (*Test Telegram* berhasil) dan `TELEGRAM_ADMIN_IDS` sudah diisi
 - [ ] `.secrets/master.key` sudah di-backup, `npm run wallet -- export` sudah dicoba
 - [ ] Ukuran posisi, max posisi terbuka, dan max spend/24 jam sudah diatur di ⚙ Settings
+- [ ] Kalau *Strategy 2 (dip reversal)* dinyalakan: hasil paper-nya sudah dinilai terpisah di KPI *Dip strategy*, dan `dipEntrySol` + `solReserve` sudah pas dengan saldo wallet
 - [ ] SOL sudah dikirim ke alamat trading wallet
 - [ ] ⚙ Settings → matikan *Paper trading* → ketik `LIVE` → Save
 
@@ -276,6 +278,7 @@ Tombol **⏻ HALT BUYS** di cockpit menghentikan semua pembelian baru seketika. 
 | `BUYS HALTED` | Circuit breaker: ≥3 stop-loss dalam 60 menit, atau HALT ditekan. Otomatis normal lagi setelah jendela 60 menit, atau klik *RESUME BUYS*. |
 | `insufficient balance` di Decision Log | Saldo SOL kurang dari ukuran posisi + reserve. Isi SOL atau kecilkan ukuran posisi. |
 | `No Jupiter route` | Token terlalu baru/tipis atau Jupiter sedang gangguan. Sinyal akan dilewati (aman). |
+| Scanner dip tidak pernah menemukan apa pun | Normal kalau pasar sedang naik semua (tidak ada yang oversold). Kalau log berisi `no candles for any candidate`, sumber candle tidak bisa diakses — cek `GECKOTERMINAL_API_BASE` atau isi `BIRDEYE_API_KEY` sebagai fallback. Longgarkan `dipRsiOversold` / `dipMinNarrativeScore` kalau terlalu ketat. |
 | Cockpit tidak bisa dibuka dari HP/komputer lain | Default hanya `127.0.0.1`. Di Mac: jalankan ulang `./scripts/mac-setup.sh` dan jawab `y` untuk akses LAN (butuh password), atau pakai SSH tunnel: `ssh -L 3000:127.0.0.1:3000 user@mac-studio.local`. |
 | Bot berhenti setelah Mac restart | Belum login (lihat *auto-login* di bagian Mac Studio). Cek `./scripts/fins.sh status`. |
 | Mac masih sleep | Cek `pmset -g` → `sleep` harus `0`. Jalankan ulang `mac-setup.sh` tanpa `--no-power`. |

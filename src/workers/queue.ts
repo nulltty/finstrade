@@ -63,6 +63,16 @@ export const whaleDiscoveryQueue = new Queue('whale-discovery', {
   },
 });
 
+// Strategy 2 (RSI dip reversal) runs on its own cadence and must not share a queue with the
+// whale scanner: a slow candle fetch would otherwise delay whale signals, which are time-critical
+export const dipScannerQueue = new Queue('dip-scanner', {
+  connection: redisConnection,
+  defaultJobOptions: {
+    removeOnComplete: 50,
+    removeOnFail: 50,
+  },
+});
+
 export const dummyQueue = new Queue('dummy-test', {
   connection: redisConnection,
 });

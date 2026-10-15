@@ -44,6 +44,7 @@ const REASON_LABEL: Record<string, string> = {
   stop_loss: '🛑 Stop-loss',
   trailing_stop: '📉 Trailing stop',
   take_profit_auto: '🎯 Take-profit (auto)',
+  take_profit_usd: '💵 Take-profit ($ target)',
   take_profit_approved: '💰 Take-profit (approved)',
   take_profit_timeout: '⏱️ Take-profit (timeout auto-sell)',
   whale_exit: '🐋 Whale exited — copy-sell',
@@ -239,14 +240,12 @@ export class TelegramBotService {
     if (!signal || !signal.score) return null;
     const m = (signal.rawMetrics as any) || {};
     const b = (signal.score.breakdown as any) || {};
-    const whale = await prisma.watchedWallet.findUnique({ where: { address: signal.wallet } });
 
     const text =
       `🪙 <b>${esc(signal.tokenName)}</b> ($${esc(signal.tokenSymbol)})\n` +
       `<code>${esc(signal.tokenAddress)}</code>\n` +
-      `🐋 Whale <code>${esc(signal.wallet.slice(0, 6))}…${esc(signal.wallet.slice(-4))}</code>` +
-      (whale?.winRate ? ` · WR ${whale.winRate.toFixed(0)}% · PnL ${whale.realizedPnlSol.toFixed(1)} SOL` : '') +
-      `\n💸 Whale buy: ${usd(signal.amountUsd)}\n\n` +
+      (await this.originLines(signal)) +
+      `\n` +
       `⭐ <b>Score ${signal.score.totalScore}/100</b>\n` +
       `• Liquidity ${b.liquidity?.score}/100 — ${esc(b.liquidity?.note)}\n` +
       `• Top10 ${b.holderConcentration?.score}/100 — ${esc(b.holderConcentration?.note)}\n` +
@@ -262,6 +261,28 @@ export class TelegramBotService {
     return { signal, text };
   }
 
+  /** Where the signal came from: the whale behind it, or the scanner's own evidence */
+  private async originLines(signal: { source: string; wallet: string; amountUsd: number | null; strategyMeta: unknown }) {
+    if (signal.source === 'dip_reversal') {
+      const meta = (signal.strategyMeta as any) || {};
+      const num = (v: any, d = 1) => (typeof v === 'number' ? v.toFixed(d) : '—');
+      return (
+        `📉 <b>RSI dip reversal</b> (${esc(meta.timeframe || '15m')}) — RSI ${num(meta.rsi)} ` +
+        `(low ${num(meta.rsiLow)}, naik dari ${num(meta.rsiPrev)})\n` +
+        `📖 Narasi: <b>${esc(meta.narrative || 'tidak dikenali')}</b> ${num(meta.narrativeScore, 0)}/100` +
+        (Array.isArray(meta.narrativeTags) && meta.narrativeTags.length ? ` · ${esc(meta.narrativeTags.join(', '))}` : '') +
+        `\n📊 +${num(meta.bounceFromLowPct, 2)}% dari low · volume ${num(meta.volumeVsBasePct, 0)}% baseline\n` +
+        `💵 Rencana: masuk ${num(meta.entrySol, 2)} SOL · TP $${num(meta.tpUsd, 2)}–$${num(meta.tpUsdMax, 2)} · SL −${num(meta.slPercent, 0)}%\n`
+      );
+    }
+    const whale = await prisma.watchedWallet.findUnique({ where: { address: signal.wallet } });
+    return (
+      `🐋 Whale <code>${esc(signal.wallet.slice(0, 6))}…${esc(signal.wallet.slice(-4))}</code>` +
+      (whale?.winRate ? ` · WR ${whale.winRate.toFixed(0)}% · PnL ${whale.realizedPnlSol.toFixed(1)} SOL` : '') +
+      `\n💸 Whale buy: ${usd(signal.amountUsd)}\n`
+    );
+  }
+
   /**
    * Send Buy Signal Alert to Telegram with inline buttons [Approve] [Skip]
    */
@@ -274,8 +295,9 @@ export class TelegramBotService {
       .text('✅ Approve Buy', `approve_buy:${signalId}`)
       .text('❌ Skip', `skip_buy:${signalId}`);
 
+    const headline = summary.signal.source === 'dip_reversal' ? 'DIP REVERSAL SIGNAL' : 'WHALE BUY SIGNAL';
     const text =
-      `🚨 <b>WHALE BUY SIGNAL — APPROVAL NEEDED</b>\n\n${summary.text}\n\n` +
+      `🚨 <b>${headline} — APPROVAL NEEDED</b>\n\n${summary.text}\n\n` +
       `⏱️ Timeout ${Math.round(settings.approvalTimeoutSec / 60)} menit (default: ${settings.buyTimeoutAction === 'auto_buy' ? 'auto-buy' : 'skip'})`;
     const sentMessageId = await this.notify(text, keyboard);
 
@@ -432,6 +454,16 @@ export class TelegramBotService {
     await this.notify(
       `${REASON_LABEL[reason] || reason} — <b>${esc(position.tokenSymbol)}</b>\n` +
         `PnL <b>${pct(pnlPercent)}</b> (${pnlUsd >= 0 ? '+' : '−'}${usd(Math.abs(pnlUsd))})${tx}`
+    );
+  }
+
+  /** Absolute-USD take profit reached but the price is still climbing — riding to the stretch target */
+  async sendUsdTakeProfitRidingNotice(positionId: string, netPnlUsd: number, target: number, stretch: number) {
+    const position = await prisma.position.findUnique({ where: { id: positionId } });
+    if (!position) return;
+    await this.notify(
+      `💵 <b>${esc(position.tokenSymbol)}</b> — profit bersih ${usd(netPnlUsd)} (target ${usd(target)}).\n` +
+        `Harga masih naik, jadi ditahan dulu sampai ${usd(stretch)} atau sampai momentum berhenti.`
     );
   }
 
